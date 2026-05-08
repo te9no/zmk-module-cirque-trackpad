@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 #include <zephyr/device.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/spi.h>
@@ -47,6 +49,7 @@
 #define PINNACLE_SLEEP_TIMER 0x0D    // Sleep Timer
 #define PINNACLE_AG_PACKET0 0x10     // trackpad Data (Pinnacle AG)
 #define PINNACLE_2_2_PACKET0 0x12    // trackpad Data
+#define PINNACLE_2_2_ABS_PACKET0 0x14 // absolute X/Y/Z data
 #define PINNACLE_REG_COUNT 0x18
 
 #define PINNACLE_REG_ERA_VALUE 0x1B
@@ -75,9 +78,20 @@
 struct pinnacle_data {
     uint8_t btn_cache;
     bool in_int;
+    bool touching;
+    bool moved_since_touch;
+    bool scroll_active;
+    bool drag_active;
+    uint16_t last_x;
+    uint16_t last_y;
+    int32_t scroll_pos;
+    int32_t scroll_accum;
+    int64_t touch_start_ms;
+    int64_t last_tap_ms;
     const struct device *dev;
     struct gpio_callback gpio_cb;
     struct k_work work;
+    struct k_work_delayable click_work;
 };
 
 enum pinnacle_sensitivity {
@@ -101,8 +115,12 @@ struct pinnacle_config {
     pinnacle_write_t write;
 
     bool rotate_90, sleep_en, no_taps, no_secondary_tap, x_invert, y_invert;
+    bool absolute_gestures, tap_to_click, double_tap_drag, reverse_circular_scroll;
     enum pinnacle_sensitivity sensitivity;
     uint8_t x_axis_z_min, y_axis_z_min;
+    uint8_t touch_z_threshold;
+    uint16_t x_max, y_max, edge_scroll_margin, pointer_divisor, tap_timeout_ms, double_tap_ms;
+    uint16_t tap_move_threshold, scroll_step;
     const struct gpio_dt_spec dr;
 };
 

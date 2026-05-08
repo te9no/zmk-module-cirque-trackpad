@@ -4,6 +4,7 @@
 #include <zephyr/init.h>
 #include <zephyr/input/input.h>
 #include <zephyr/pm/device.h>
+#include <zephyr/sys/util.h>
 
 #include <zephyr/logging/log.h>
 
@@ -229,10 +230,212 @@ static int pinnacle_era_write(const struct device *dev, const uint16_t addr, uin
     return ret;
 }
 
+struct pinnacle_abs_sample {
+    uint16_t x;
+    uint16_t y;
+    uint8_t z;
+};
+
+static void pinnacle_decode_abs_sample(const uint8_t *packet, struct pinnacle_abs_sample *sample) {
+    sample->x = ((packet[2] & 0x0F) << 8) | packet[0];
+    sample->y = ((packet[2] & 0xF0) << 4) | packet[1];
+    sample->z = packet[3] & 0x3F;
+}
+
+static bool pinnacle_in_edge_scroll_zone(const struct device *dev, uint16_t x, uint16_t y) {
+    const struct pinnacle_config *config = dev->config;
+
+    return x <= config->edge_scroll_margin || x >= (config->x_max - config->edge_scroll_margin) ||
+           y <= config->edge_scroll_margin || y >= (config->y_max - config->edge_scroll_margin);
+}
+
+static int32_t pinnacle_edge_scroll_position(const struct device *dev, uint16_t x, uint16_t y) {
+    const struct pinnacle_config *config = dev->config;
+    const uint16_t right_edge = config->x_max - config->edge_scroll_margin;
+    const uint16_t bottom_edge = config->y_max - config->edge_scroll_margin;
+
+    if (y <= config->edge_scroll_margin) {
+        return x;
+    }
+    if (x >= right_edge) {
+        return config->x_max + y;
+    }
+    if (y >= bottom_edge) {
+        return config->x_max + config->y_max + (config->x_max - x);
+    }
+
+    return (2 * config->x_max) + config->y_max + (config->y_max - y);
+}
+
+static int32_t pinnacle_shortest_ring_delta(const struct device *dev, int32_t from, int32_t to) {
+    const struct pinnacle_config *config = dev->config;
+    const int32_t perimeter = 2 * ((int32_t)config->x_max + config->y_max);
+    int32_t delta = to - from;
+
+    if (delta > perimeter / 2) {
+        delta -= perimeter;
+    } else if (delta < -perimeter / 2) {
+        delta += perimeter;
+    }
+
+    return delta;
+}
+
+static void pinnacle_release_drag(const struct device *dev) {
+    struct pinnacle_data *data = dev->data;
+
+    if (data->drag_active) {
+        input_report_key(dev, INPUT_BTN_0, 0, true, K_FOREVER);
+        data->drag_active = false;
+    }
+}
+
+static void pinnacle_deferred_click_cb(struct k_work *work) {
+    struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+    struct pinnacle_data *data = CONTAINER_OF(dwork, struct pinnacle_data, click_work);
+    const struct device *dev = data->dev;
+
+    if (!data->drag_active) {
+        input_report_key(dev, INPUT_BTN_0, 1, false, K_FOREVER);
+        input_report_key(dev, INPUT_BTN_0, 0, true, K_FOREVER);
+    }
+    data->last_tap_ms = -1;
+}
+
+static void pinnacle_handle_tap_release(const struct device *dev, int64_t now_ms) {
+    const struct pinnacle_config *config = dev->config;
+    struct pinnacle_data *data = dev->data;
+
+    if (!config->tap_to_click || data->moved_since_touch ||
+        (now_ms - data->touch_start_ms) > config->tap_timeout_ms) {
+        return;
+    }
+
+    if (config->double_tap_drag && data->last_tap_ms >= 0 &&
+        (now_ms - data->last_tap_ms) <= config->double_tap_ms) {
+        k_work_cancel_delayable(&data->click_work);
+        if (data->drag_active) {
+            pinnacle_release_drag(dev);
+        } else {
+            input_report_key(dev, INPUT_BTN_0, 1, true, K_FOREVER);
+            data->drag_active = true;
+        }
+        data->last_tap_ms = -1;
+        return;
+    }
+
+    if (config->double_tap_drag) {
+        data->last_tap_ms = now_ms;
+        k_work_schedule(&data->click_work, K_MSEC(config->double_tap_ms));
+    } else if (!data->drag_active) {
+        input_report_key(dev, INPUT_BTN_0, 1, false, K_FOREVER);
+        input_report_key(dev, INPUT_BTN_0, 0, true, K_FOREVER);
+        data->last_tap_ms = now_ms;
+    }
+}
+
+static void pinnacle_report_abs_gestures(const struct device *dev) {
+    const struct pinnacle_config *config = dev->config;
+    struct pinnacle_data *data = dev->data;
+    struct pinnacle_abs_sample sample;
+    uint8_t packet[4];
+    int ret = pinnacle_seq_read(dev, PINNACLE_STATUS1, packet, 1);
+
+    if (ret < 0) {
+        LOG_ERR("read status: %d", ret);
+        return;
+    }
+
+    if (packet[0] == 0xFF || !(packet[0] & PINNACLE_STATUS1_SW_DR)) {
+        return;
+    }
+
+    ret = pinnacle_seq_read(dev, PINNACLE_2_2_ABS_PACKET0, packet, 4);
+    if (ret < 0) {
+        LOG_ERR("read absolute packet: %d", ret);
+        return;
+    }
+
+    pinnacle_decode_abs_sample(packet, &sample);
+    ret = pinnacle_clear_status(dev);
+    if (ret < 0) {
+        return;
+    }
+
+    const int64_t now_ms = k_uptime_get();
+    const bool touching = sample.z >= config->touch_z_threshold;
+
+    if (!touching) {
+        if (data->touching) {
+            pinnacle_handle_tap_release(dev, now_ms);
+        }
+        data->touching = false;
+        data->scroll_active = false;
+        data->scroll_accum = 0;
+        return;
+    }
+
+    if (!data->touching) {
+        data->touching = true;
+        data->moved_since_touch = false;
+        data->scroll_active = pinnacle_in_edge_scroll_zone(dev, sample.x, sample.y);
+        data->scroll_pos = pinnacle_edge_scroll_position(dev, sample.x, sample.y);
+        data->last_x = sample.x;
+        data->last_y = sample.y;
+        data->touch_start_ms = now_ms;
+        return;
+    }
+
+    const int32_t dx = (int32_t)sample.x - data->last_x;
+    const int32_t dy = (int32_t)sample.y - data->last_y;
+
+    if (ABS(dx) > config->tap_move_threshold || ABS(dy) > config->tap_move_threshold) {
+        data->moved_since_touch = true;
+    }
+
+    if (!data->scroll_active && pinnacle_in_edge_scroll_zone(dev, sample.x, sample.y)) {
+        data->scroll_active = true;
+        data->scroll_pos = pinnacle_edge_scroll_position(dev, sample.x, sample.y);
+        data->last_x = sample.x;
+        data->last_y = sample.y;
+        return;
+    }
+
+    if (data->scroll_active) {
+        const int32_t pos = pinnacle_edge_scroll_position(dev, sample.x, sample.y);
+        data->scroll_accum += pinnacle_shortest_ring_delta(dev, data->scroll_pos, pos);
+        data->scroll_pos = pos;
+
+        const uint16_t scroll_step = config->scroll_step ? config->scroll_step : 1;
+        int32_t steps = data->scroll_accum / scroll_step;
+        if (steps != 0) {
+            data->scroll_accum -= steps * scroll_step;
+            if (!config->reverse_circular_scroll) {
+                steps = -steps;
+            }
+            input_report_rel(dev, INPUT_REL_WHEEL, steps, true, K_FOREVER);
+        }
+    } else {
+        const uint16_t pointer_divisor = config->pointer_divisor ? config->pointer_divisor : 1;
+
+        input_report_rel(dev, INPUT_REL_X, dx / pointer_divisor, false, K_FOREVER);
+        input_report_rel(dev, INPUT_REL_Y, dy / pointer_divisor, true, K_FOREVER);
+    }
+
+    data->last_x = sample.x;
+    data->last_y = sample.y;
+}
+
 static void pinnacle_report_data(const struct device *dev) {
     const struct pinnacle_config *config = dev->config;
     uint8_t packet[3];
     int ret;
+
+    if (config->absolute_gestures) {
+        pinnacle_report_abs_gestures(dev);
+        return;
+    }
+
     ret = pinnacle_seq_read(dev, PINNACLE_STATUS1, packet, 1);
     if (ret < 0) {
         LOG_ERR("read status: %d", ret);
@@ -435,6 +638,12 @@ static int pinnacle_init(const struct device *dev) {
     LOG_DBG("Found device with FW ID: 0x%02x, Version: 0x%02x", fw_id[0], fw_id[1]);
 
     data->in_int = false;
+    data->touching = false;
+    data->moved_since_touch = false;
+    data->scroll_active = false;
+    data->drag_active = false;
+    data->scroll_accum = 0;
+    data->last_tap_ms = -1;
     k_msleep(10);
     ret = pinnacle_write(dev, PINNACLE_STATUS1, 0); // Clear CC
     if (ret < 0) {
@@ -490,7 +699,9 @@ static int pinnacle_init(const struct device *dev) {
         LOG_DBG("Failed to update sleep interaval %d", ret);
     }
 
-    uint8_t feed_cfg2 = PINNACLE_FEED_CFG2_EN_IM | PINNACLE_FEED_CFG2_EN_BTN_SCRL;
+    uint8_t feed_cfg2 = config->absolute_gestures ? PINNACLE_FEED_CFG2_DIS_TAP
+                                                  : (PINNACLE_FEED_CFG2_EN_IM |
+                                                     PINNACLE_FEED_CFG2_EN_BTN_SCRL);
     if (config->no_taps) {
         feed_cfg2 |= PINNACLE_FEED_CFG2_DIS_TAP;
     }
@@ -508,6 +719,9 @@ static int pinnacle_init(const struct device *dev) {
         return ret;
     }
     uint8_t feed_cfg1 = PINNACLE_FEED_CFG1_EN_FEED;
+    if (config->absolute_gestures) {
+        feed_cfg1 |= PINNACLE_FEED_CFG1_ABS_MODE;
+    }
     if (config->x_invert) {
         feed_cfg1 |= PINNACLE_FEED_CFG1_INV_X;
     }
@@ -536,6 +750,7 @@ static int pinnacle_init(const struct device *dev) {
     }
 
     k_work_init(&data->work, pinnacle_work_cb);
+    k_work_init_delayable(&data->click_work, pinnacle_deferred_click_cb);
 
     pinnacle_write(dev, PINNACLE_FEED_CFG1, feed_cfg1);
 
@@ -576,8 +791,21 @@ static int pinnacle_pm_action(const struct device *dev, enum pm_device_action ac
         .sleep_en = DT_INST_PROP(n, sleep),                                                        \
         .no_taps = DT_INST_PROP(n, no_taps),                                                       \
         .no_secondary_tap = DT_INST_PROP(n, no_secondary_tap),                                     \
+        .absolute_gestures = DT_INST_PROP(n, absolute_gestures),                                    \
+        .tap_to_click = DT_INST_PROP(n, tap_to_click),                                             \
+        .double_tap_drag = DT_INST_PROP(n, double_tap_drag),                                       \
+        .reverse_circular_scroll = DT_INST_PROP(n, reverse_circular_scroll),                       \
         .x_axis_z_min = DT_INST_PROP_OR(n, x_axis_z_min, 5),                                       \
         .y_axis_z_min = DT_INST_PROP_OR(n, y_axis_z_min, 4),                                       \
+        .touch_z_threshold = DT_INST_PROP_OR(n, touch_z_threshold, 8),                             \
+        .x_max = DT_INST_PROP_OR(n, x_max, 2047),                                                  \
+        .y_max = DT_INST_PROP_OR(n, y_max, 2047),                                                  \
+        .edge_scroll_margin = DT_INST_PROP_OR(n, edge_scroll_margin, 220),                         \
+        .pointer_divisor = DT_INST_PROP_OR(n, pointer_divisor, 4),                                  \
+        .tap_timeout_ms = DT_INST_PROP_OR(n, tap_timeout_ms, 180),                                  \
+        .double_tap_ms = DT_INST_PROP_OR(n, double_tap_ms, 350),                                   \
+        .tap_move_threshold = DT_INST_PROP_OR(n, tap_move_threshold, 80),                           \
+        .scroll_step = DT_INST_PROP_OR(n, scroll_step, 160),                                       \
         .sensitivity = DT_INST_ENUM_IDX_OR(n, sensitivity, PINNACLE_SENSITIVITY_1X),               \
         .dr = GPIO_DT_SPEC_GET_OR(DT_DRV_INST(n), dr_gpios, {}),                                   \
     };                                                                                             \

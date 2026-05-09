@@ -1,0 +1,3 @@
+dya.trackpad.TrackpadDevice.name max_size:48
+dya.trackpad.ListDevicesResponse.devices max_count:8
+dya.trackpad.ErrorResponse.message max_size:96

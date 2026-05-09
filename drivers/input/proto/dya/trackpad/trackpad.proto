@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package dya.trackpad;
+
+enum Sensitivity {
+  SENSITIVITY_1X = 0;
+  SENSITIVITY_2X = 1;
+  SENSITIVITY_3X = 2;
+  SENSITIVITY_4X = 3;
+}
+
+message TrackpadDevice {
+  uint32 id = 1;
+  string name = 2;
+  bool rotate90 = 3;
+  bool xInvert = 4;
+  bool yInvert = 5;
+  bool sleep = 6;
+  bool noTaps = 7;
+  bool noSecondaryTap = 8;
+  bool absoluteGestures = 9;
+  bool tapToClick = 10;
+  bool doubleTapDrag = 11;
+  bool reverseCircularScroll = 12;
+  Sensitivity sensitivity = 13;
+  uint32 xAxisZMin = 14;
+  uint32 yAxisZMin = 15;
+  uint32 touchZThreshold = 16;
+  uint32 xMax = 17;
+  uint32 yMax = 18;
+  uint32 edgeScrollMargin = 19;
+  uint32 pointerDivisor = 20;
+  uint32 tapTimeoutMs = 21;
+  uint32 doubleTapMs = 22;
+  uint32 tapMoveThreshold = 23;
+  uint32 scrollStep = 24;
+  bool ready = 25;
+}
+
+message ListDevicesRequest {}
+message ListDevicesResponse { repeated TrackpadDevice devices = 1; }
+
+message GetDeviceRequest { uint32 id = 1; }
+message GetDeviceResponse { TrackpadDevice device = 1; }
+
+message SetSleepRequest {
+  uint32 id = 1;
+  bool enabled = 2;
+}
+message SetSleepResponse {}
+
+message ResetDeviceRequest { uint32 id = 1; }
+message ResetDeviceResponse {}
+
+message ErrorResponse { string message = 1; }
+
+message Request {
+  oneof request_type {
+    ListDevicesRequest list_devices = 1;
+    GetDeviceRequest get_device = 2;
+    SetSleepRequest set_sleep = 3;
+    ResetDeviceRequest reset_device = 4;
+  }
+}
+
+message Response {
+  oneof response_type {
+    ErrorResponse error = 1;
+    ListDevicesResponse list_devices = 2;
+    GetDeviceResponse get_device = 3;
+    SetSleepResponse set_sleep = 4;
+    ResetDeviceResponse reset_device = 5;
+  }
+}

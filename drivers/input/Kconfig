@@ -11,6 +11,12 @@ menuconfig INPUT_PINNACLE
     help
       Enable driver for Cirque Pinnacle trackpads
 
+config INPUT_PINNACLE_STUDIO_RPC
+    bool "Enable DYA trackpad custom Studio RPC"
+    depends on INPUT_PINNACLE
+    help
+      Compatibility option for configs that enable trackpad Studio RPC.
+
 if INPUT_PINNACLE
 
 config INPUT_PINNACLE_INIT_PRIORITY

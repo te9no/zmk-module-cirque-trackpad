@@ -7,7 +7,12 @@ import {
 } from "@cormoran/zmk-studio-react-hook";
 import { Request, Response, Sensitivity, type TrackpadDevice } from "./proto/dya/trackpad/trackpad";
 
-const SUBSYSTEM_CANDIDATES = ["dya__trackpad", "zmk__trackpad", "trackpad"];
+const SUBSYSTEM_CANDIDATES = [
+  "dya__trackpad",
+  "dya_trackpad",
+  "zmk__trackpad",
+  "trackpad",
+];
 
 export function App() {
   return (
@@ -53,6 +58,13 @@ function TrackpadSection() {
       if (found) {
         return found;
       }
+    }
+    const available = (zmkApp.state.connection as any)?.subsystems ?? [];
+    const bestEffort = available.find((s: any) =>
+      String(s?.identifier ?? "").toLowerCase().includes("track")
+    );
+    if (bestEffort) {
+      return bestEffort;
     }
     return null;
   }, [zmkApp]);

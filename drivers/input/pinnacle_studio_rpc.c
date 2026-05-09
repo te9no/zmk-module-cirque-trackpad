@@ -83,7 +83,7 @@ bool zmk_rpc_custom_subsystem_encode_response_payload(pb_ostream_t *stream,
     zmk_rpc_custom_subsystem_response_buffer_allocate_##_subsystem_identifier(encode_response)
 
 static struct zmk_rpc_custom_subsystem_meta trackpad_rpc_meta = {
-    ZMK_RPC_CUSTOM_SUBSYSTEM_UI_URLS(""),
+    ZMK_RPC_CUSTOM_SUBSYSTEM_UI_URLS("https://te9no.github.io/zmk-module-cirque-trackpad/"),
     .security = ZMK_STUDIO_RPC_HANDLER_UNSECURED,
 };
 

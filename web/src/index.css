@@ -19,6 +19,34 @@ body {
   line-height: 1.5;
 }
 
+.card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+button,
+select {
+  background: #21262d;
+  color: #e6edf3;
+  border: 1px solid #3d444d;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.error {
+  color: #ff7b72;
+}
+
 code {
   background: #161b22;
   padding: 2px 6px;

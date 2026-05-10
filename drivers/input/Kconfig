@@ -14,6 +14,7 @@ menuconfig INPUT_PINNACLE
 config INPUT_PINNACLE_STUDIO_RPC
     bool "Enable DYA trackpad custom Studio RPC"
     depends on INPUT_PINNACLE
+    select NANOPB
     help
       Compatibility option for configs that enable trackpad Studio RPC.
 

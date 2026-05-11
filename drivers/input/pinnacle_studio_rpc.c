@@ -323,6 +323,8 @@ struct trackpad_persisted_config {
 };
 
 static bool trackpad_settings_loading;
+static atomic_t trackpad_settings_save_pending;
+static struct k_work_delayable trackpad_settings_save_work;
 
 static int local_device_id(const struct device *dev, uint32_t *id) {
     for (size_t i = 0; i < ARRAY_SIZE(pinnacle_devices); i++) {
@@ -421,6 +423,40 @@ static int save_local_device_settings(const struct device *dev) {
     return rc;
 }
 
+static void trackpad_settings_save_work_handler(struct k_work *work) {
+    atomic_val_t pending = atomic_set(&trackpad_settings_save_pending, 0);
+
+    for (size_t i = 0; i < ARRAY_SIZE(pinnacle_devices); i++) {
+        if ((pending & BIT(i)) == 0) {
+            continue;
+        }
+
+        const struct device *dev = pinnacle_devices[i];
+        if (dev == NULL || !device_is_ready(dev)) {
+            continue;
+        }
+
+        save_local_device_settings(dev);
+    }
+}
+
+static void schedule_local_device_settings_save(const struct device *dev) {
+    uint32_t id;
+    if (trackpad_settings_loading || local_device_id(dev, &id) != 0) {
+        return;
+    }
+
+    atomic_or(&trackpad_settings_save_pending, BIT(id));
+    k_work_reschedule(&trackpad_settings_save_work, K_MSEC(CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE));
+}
+
+static int trackpad_settings_init(void) {
+    k_work_init_delayable(&trackpad_settings_save_work, trackpad_settings_save_work_handler);
+    return 0;
+}
+
+SYS_INIT(trackpad_settings_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+
 #endif
 
 static int set_local_sleep_by_id(uint32_t id, bool enabled) {
@@ -438,9 +474,7 @@ static int set_local_sleep_by_id(uint32_t id, bool enabled) {
     struct pinnacle_config *cfg = (struct pinnacle_config *)dev->config;
     cfg->sleep_en = enabled;
 #if IS_ENABLED(CONFIG_SETTINGS) && IS_ENABLED(CONFIG_INPUT_PINNACLE)
-    if (!trackpad_settings_loading) {
-        return save_local_device_settings(dev);
-    }
+    schedule_local_device_settings_save(dev);
 #endif
     return 0;
 #else
@@ -495,12 +529,7 @@ static int apply_local_device_by_id(const dya_trackpad_TrackpadDevice *device) {
     }
 
 #if IS_ENABLED(CONFIG_SETTINGS) && IS_ENABLED(CONFIG_INPUT_PINNACLE)
-    if (!trackpad_settings_loading) {
-        rc = save_local_device_settings(dev);
-        if (rc != 0) {
-            return rc;
-        }
-    }
+    schedule_local_device_settings_save(dev);
 #endif
 
     return 0;

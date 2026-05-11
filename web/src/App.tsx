@@ -13,9 +13,6 @@ const SUBSYSTEM_CANDIDATES = [
   "dya_trackpad",
   "zmk__trackpad",
   "trackpad",
-  "tpd",
-  "dya__tpd",
-  "dya_tpd",
 ];
 
 const BOOL_FIELDS: Array<keyof TrackpadDevice> = [
@@ -183,13 +180,7 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
         return found;
       }
     }
-    const available = (zmkApp.state.connection as any)?.subsystems ?? [];
-    return (
-      available.find((s: any) => {
-        const id = String(s?.identifier ?? "").toLowerCase();
-        return id.includes("track") || id.includes("tpd");
-      }) ?? null
-    );
+    return null;
   }, [zmkApp, demoMode]);
 
   const call = async (request: Request) => {
@@ -353,6 +344,11 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
         <p className="hint">
           Tried: {SUBSYSTEM_CANDIDATES.join(", ")} | Available:{" "}
           {availableSubsystemIds.length > 0 ? availableSubsystemIds.join(", ") : "(none)"}
+        </p>
+      )}
+      {!demoMode && subsystem && (
+        <p className="hint">
+          Using subsystem: {formatSubsystem(subsystem as unknown as Record<string, unknown>)}
         </p>
       )}
 

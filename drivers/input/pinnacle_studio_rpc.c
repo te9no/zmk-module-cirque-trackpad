@@ -556,13 +556,13 @@ static bool dya_trackpad_rpc_handle_request(const zmk_custom_CallRequest *raw_re
         ZMK_RPC_CUSTOM_SUBSYSTEM_RESPONSE_BUFFER_ALLOCATE(dya__trackpad, encode_response);
     dya_trackpad_Request req = dya_trackpad_Request_init_zero;
 
-    if (raw_request->payload == NULL) {
+    if (raw_request->payload.size == 0) {
         set_error(resp, "Empty request payload");
         return true;
     }
 
     pb_istream_t req_stream =
-        pb_istream_from_buffer(raw_request->payload->bytes, raw_request->payload->size);
+        pb_istream_from_buffer(raw_request->payload.bytes, raw_request->payload.size);
     if (!pb_decode(&req_stream, dya_trackpad_Request_fields, &req)) {
         char message[96];
 

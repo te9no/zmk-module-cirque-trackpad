@@ -118,9 +118,12 @@ export function App() {
       </header>
 
       {demoMode ? (
-        <section className="card accent">
-          <p>Demo mode is active. No serial connection required.</p>
-        </section>
+        <>
+          <section className="card accent">
+            <p>Demo mode is active. No serial connection required.</p>
+          </section>
+          <TrackpadSection demoMode />
+        </>
       ) : (
         <ZMKConnection
           renderDisconnected={({ connect, isLoading, error }) => (
@@ -142,17 +145,18 @@ export function App() {
             </section>
           )}
           renderConnected={({ disconnect, deviceName }) => (
-            <section className="card accent row between">
-              <p>Connected: {deviceName}</p>
-              <button className="btn" onClick={disconnect}>
-                Disconnect
-              </button>
-            </section>
+            <>
+              <section className="card accent row between">
+                <p>Connected: {deviceName}</p>
+                <button className="btn" onClick={disconnect}>
+                  Disconnect
+                </button>
+              </section>
+              <TrackpadSection demoMode={false} />
+            </>
           )}
         />
       )}
-
-      <TrackpadSection demoMode={demoMode} />
     </div>
   );
 }

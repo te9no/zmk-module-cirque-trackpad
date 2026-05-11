@@ -291,6 +291,8 @@ static int reset_local_device_by_id(uint32_t id) {
 
 #define TRACKPAD_SETTINGS_VERSION 1
 #define TRACKPAD_SETTINGS_PREFIX "dya/trackpad"
+#define TRACKPAD_SETTINGS_SAVE_DELAY_MS 250
+#define TRACKPAD_SETTINGS_SAVE_RETRY_MS 1000
 
 struct trackpad_persisted_config {
     uint8_t version;
@@ -425,6 +427,7 @@ static int save_local_device_settings(const struct device *dev) {
 
 static void trackpad_settings_save_work_handler(struct k_work *work) {
     atomic_val_t pending = atomic_set(&trackpad_settings_save_pending, 0);
+    atomic_val_t retry = 0;
 
     for (size_t i = 0; i < ARRAY_SIZE(pinnacle_devices); i++) {
         if ((pending & BIT(i)) == 0) {
@@ -436,7 +439,15 @@ static void trackpad_settings_save_work_handler(struct k_work *work) {
             continue;
         }
 
-        save_local_device_settings(dev);
+        if (save_local_device_settings(dev) != 0) {
+            retry |= BIT(i);
+        }
+    }
+
+    if (retry != 0) {
+        atomic_or(&trackpad_settings_save_pending, retry);
+        k_work_reschedule(&trackpad_settings_save_work,
+                          K_MSEC(TRACKPAD_SETTINGS_SAVE_RETRY_MS));
     }
 }
 
@@ -447,7 +458,7 @@ static void schedule_local_device_settings_save(const struct device *dev) {
     }
 
     atomic_or(&trackpad_settings_save_pending, BIT(id));
-    k_work_reschedule(&trackpad_settings_save_work, K_MSEC(CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE));
+    k_work_reschedule(&trackpad_settings_save_work, K_MSEC(TRACKPAD_SETTINGS_SAVE_DELAY_MS));
 }
 
 static int trackpad_settings_init(void) {

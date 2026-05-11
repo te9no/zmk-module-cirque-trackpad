@@ -7,50 +7,148 @@ import {
 } from "@cormoran/zmk-studio-react-hook";
 import { Request, Response, Sensitivity, type TrackpadDevice } from "./proto/dya/trackpad/trackpad";
 
-const SUBSYSTEM_CANDIDATES = [
-  "dya__trackpad",
-  "dya_trackpad",
-  "zmk__trackpad",
-  "trackpad",
+const SUBSYSTEM_CANDIDATES = ["dya__trackpad", "dya_trackpad", "zmk__trackpad", "trackpad"];
+
+const BOOL_FIELDS: Array<keyof TrackpadDevice> = [
+  "rotate90",
+  "xInvert",
+  "yInvert",
+  "noTaps",
+  "noSecondaryTap",
+  "absoluteGestures",
+  "tapToClick",
+  "doubleTapDrag",
+  "reverseCircularScroll",
+];
+
+const NUMBER_FIELDS: Array<keyof TrackpadDevice> = [
+  "xAxisZMin",
+  "yAxisZMin",
+  "touchZThreshold",
+  "xMax",
+  "yMax",
+  "edgeScrollMargin",
+  "pointerDivisor",
+  "tapTimeoutMs",
+  "doubleTapMs",
+  "tapMoveThreshold",
+  "scrollStep",
+];
+
+const DEMO_DEVICES: TrackpadDevice[] = [
+  {
+    id: 0,
+    name: "demo-left",
+    rotate90: true,
+    xInvert: false,
+    yInvert: false,
+    sleep: false,
+    noTaps: false,
+    noSecondaryTap: false,
+    absoluteGestures: true,
+    tapToClick: true,
+    doubleTapDrag: true,
+    reverseCircularScroll: false,
+    sensitivity: Sensitivity.SENSITIVITY_2X,
+    xAxisZMin: 5,
+    yAxisZMin: 4,
+    touchZThreshold: 8,
+    xMax: 2047,
+    yMax: 1535,
+    edgeScrollMargin: 220,
+    pointerDivisor: 4,
+    tapTimeoutMs: 180,
+    doubleTapMs: 350,
+    tapMoveThreshold: 80,
+    scrollStep: 160,
+    ready: true,
+  },
+  {
+    id: 1,
+    name: "demo-right",
+    rotate90: true,
+    xInvert: true,
+    yInvert: true,
+    sleep: false,
+    noTaps: false,
+    noSecondaryTap: true,
+    absoluteGestures: true,
+    tapToClick: true,
+    doubleTapDrag: false,
+    reverseCircularScroll: true,
+    sensitivity: Sensitivity.SENSITIVITY_3X,
+    xAxisZMin: 6,
+    yAxisZMin: 5,
+    touchZThreshold: 10,
+    xMax: 2047,
+    yMax: 1535,
+    edgeScrollMargin: 240,
+    pointerDivisor: 5,
+    tapTimeoutMs: 200,
+    doubleTapMs: 300,
+    tapMoveThreshold: 70,
+    scrollStep: 140,
+    ready: true,
+  },
 ];
 
 export function App() {
+  const [demoMode, setDemoMode] = useState(false);
+
   return (
-    <div className="app">
-      <h1>Cirque Trackpad Studio UI</h1>
-      <ZMKConnection
-        renderDisconnected={({ connect, isLoading, error }) => (
-          <section className="card">
-            {isLoading && <p>Connecting...</p>}
-            {error && <p className="error">{error}</p>}
-            <button disabled={isLoading} onClick={() => connect(serialConnect)}>
-              Connect Serial
-            </button>
-          </section>
-        )}
-        renderConnected={({ disconnect, deviceName }) => (
-          <>
-            <section className="card">
-              <p>Connected: {deviceName}</p>
-              <button onClick={disconnect}>Disconnect</button>
+    <div className="app-shell">
+      <header className="hero">
+        <div>
+          <p className="eyebrow">ZMK Studio Custom RPC</p>
+          <h1>Cirque Trackpad Control</h1>
+        </div>
+        <label className="switch">
+          <input type="checkbox" checked={demoMode} onChange={(e) => setDemoMode(e.target.checked)} />
+          <span>Demo Mode</span>
+        </label>
+      </header>
+
+      {demoMode ? (
+        <section className="card accent">
+          <p>Demo mode is active. No serial connection required.</p>
+        </section>
+      ) : (
+        <ZMKConnection
+          renderDisconnected={({ connect, isLoading, error }) => (
+            <section className="card accent">
+              {isLoading && <p>Connecting...</p>}
+              {error && <p className="error">{error}</p>}
+              <button className="btn primary" disabled={isLoading} onClick={() => connect(serialConnect)}>
+                Connect Serial
+              </button>
             </section>
-            <TrackpadSection />
-          </>
-        )}
-      />
+          )}
+          renderConnected={({ disconnect, deviceName }) => (
+            <section className="card accent row between">
+              <p>Connected: {deviceName}</p>
+              <button className="btn" onClick={disconnect}>
+                Disconnect
+              </button>
+            </section>
+          )}
+        />
+      )}
+
+      <TrackpadSection demoMode={demoMode} />
     </div>
   );
 }
 
-function TrackpadSection() {
+function TrackpadSection({ demoMode }: { demoMode: boolean }) {
   const zmkApp = useContext(ZMKAppContext);
   const [devices, setDevices] = useState<TrackpadDevice[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [drafts, setDrafts] = useState<Record<number, TrackpadDevice>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
 
   const subsystem = useMemo(() => {
-    if (!zmkApp) {
+    if (!zmkApp || demoMode) {
       return null;
     }
     for (const id of SUBSYSTEM_CANDIDATES) {
@@ -60,30 +158,13 @@ function TrackpadSection() {
       }
     }
     const available = (zmkApp.state.connection as any)?.subsystems ?? [];
-    const bestEffort = available.find((s: any) =>
-      String(s?.identifier ?? "").toLowerCase().includes("track")
-    );
-    if (bestEffort) {
-      return bestEffort;
-    }
-    return null;
-  }, [zmkApp]);
-
-  if (!zmkApp) {
-    return null;
-  }
-
-  if (!subsystem) {
-    return (
-      <section className="card">
-        <p className="error">
-          Trackpad subsystem not found. Tried: {SUBSYSTEM_CANDIDATES.join(", ")}
-        </p>
-      </section>
-    );
-  }
+    return available.find((s: any) => String(s?.identifier ?? "").toLowerCase().includes("track")) ?? null;
+  }, [zmkApp, demoMode]);
 
   const call = async (request: Request) => {
+    if (!zmkApp || !subsystem) {
+      throw new Error("Trackpad subsystem not available");
+    }
     const conn = zmkApp.state.connection;
     if (!conn) {
       throw new Error("No connection");
@@ -101,15 +182,30 @@ function TrackpadSection() {
     return resp;
   };
 
+  const hydrate = (nextDevices: TrackpadDevice[]) => {
+    setDevices(nextDevices);
+    setDrafts((prev) => {
+      const next = { ...prev };
+      for (const d of nextDevices) {
+        next[d.id] = d;
+      }
+      return next;
+    });
+    if (nextDevices.length > 0 && selectedId == null) {
+      setSelectedId(nextDevices[0].id);
+    }
+  };
+
   const loadDevices = async () => {
     setBusy(true);
     setError("");
     try {
-      const resp = await call(Request.create({ listDevices: {} }));
-      const nextDevices = resp.listDevices?.devices ?? [];
-      setDevices(nextDevices);
-      if (nextDevices.length > 0 && selectedId == null) {
-        setSelectedId(nextDevices[0].id);
+      if (demoMode) {
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        hydrate(DEMO_DEVICES);
+      } else {
+        const resp = await call(Request.create({ listDevices: {} }));
+        hydrate(resp.listDevices?.devices ?? []);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "RPC failed");
@@ -125,20 +221,29 @@ function TrackpadSection() {
     setBusy(true);
     setError("");
     try {
-      const resp = await call(Request.create({ getDevice: { id: selectedId } }));
-      const device = resp.getDevice?.device;
-      if (!device) {
-        throw new Error("Device not found");
-      }
-      setDevices((prev) => {
-        const idx = prev.findIndex((d) => d.id === device.id);
-        if (idx < 0) {
-          return [...prev, device];
+      if (demoMode) {
+        const latest = (drafts[selectedId] ?? devices.find((d) => d.id === selectedId)) as TrackpadDevice | undefined;
+        if (!latest) {
+          throw new Error("Device not found");
         }
-        const next = [...prev];
-        next[idx] = device;
-        return next;
-      });
+        setDevices((prev) => prev.map((d) => (d.id === selectedId ? { ...latest } : d)));
+      } else {
+        const resp = await call(Request.create({ getDevice: { id: selectedId } }));
+        const device = resp.getDevice?.device;
+        if (!device) {
+          throw new Error("Device not found");
+        }
+        setDevices((prev) => {
+          const idx = prev.findIndex((d) => d.id === device.id);
+          if (idx < 0) {
+            return [...prev, device];
+          }
+          const next = [...prev];
+          next[idx] = device;
+          return next;
+        });
+        setDrafts((prev) => ({ ...prev, [device.id]: device }));
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "RPC failed");
     } finally {
@@ -153,10 +258,17 @@ function TrackpadSection() {
     setBusy(true);
     setError("");
     try {
-      await call(Request.create({ setSleep: { id: selectedId, enabled } }));
-      await refreshOne();
+      if (demoMode) {
+        setDevices((prev) => prev.map((d) => (d.id === selectedId ? { ...d, sleep: enabled } : d)));
+        setDrafts((prev) => ({ ...prev, [selectedId]: { ...prev[selectedId], sleep: enabled } as TrackpadDevice }));
+      } else {
+        await call(Request.create({ setSleep: { id: selectedId, enabled } }));
+        await refreshOne();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "RPC failed");
+      setBusy(false);
+    } finally {
       setBusy(false);
     }
   };
@@ -168,33 +280,54 @@ function TrackpadSection() {
     setBusy(true);
     setError("");
     try {
-      await call(Request.create({ resetDevice: { id: selectedId } }));
-      await refreshOne();
+      if (demoMode) {
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        setDevices((prev) => prev.map((d) => (d.id === selectedId ? { ...d, sleep: false } : d)));
+      } else {
+        await call(Request.create({ resetDevice: { id: selectedId } }));
+        await refreshOne();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "RPC failed");
+      setBusy(false);
+    } finally {
       setBusy(false);
     }
   };
 
   const selected = devices.find((d) => d.id === selectedId) ?? null;
+  const draft = selectedId != null ? drafts[selectedId] ?? selected : null;
+
+  const updateDraft = (patch: Partial<TrackpadDevice>) => {
+    if (selectedId == null || !draft) {
+      return;
+    }
+    setDrafts((prev) => ({ ...prev, [selectedId]: { ...draft, ...patch } }));
+  };
 
   return (
     <section className="card">
-      <h2>Trackpad RPC</h2>
+      <div className="section-head">
+        <h2>Trackpad Settings</h2>
+        {!demoMode && zmkApp && !subsystem && (
+          <p className="error">Trackpad subsystem not found: {SUBSYSTEM_CANDIDATES.join(", ")}</p>
+        )}
+      </div>
+
       <div className="row">
-        <button disabled={busy} onClick={loadDevices}>
-          List Devices
+        <button className="btn primary" disabled={busy} onClick={loadDevices}>
+          {demoMode ? "Load Demo Devices" : "List Devices"}
         </button>
-        <button disabled={busy || selectedId == null} onClick={refreshOne}>
+        <button className="btn" disabled={busy || selectedId == null} onClick={refreshOne}>
           Refresh Selected
         </button>
-        <button disabled={busy || selectedId == null} onClick={() => setSleep(true)}>
+        <button className="btn" disabled={busy || selectedId == null} onClick={() => setSleep(true)}>
           Sleep ON
         </button>
-        <button disabled={busy || selectedId == null} onClick={() => setSleep(false)}>
+        <button className="btn" disabled={busy || selectedId == null} onClick={() => setSleep(false)}>
           Sleep OFF
         </button>
-        <button disabled={busy || selectedId == null} onClick={reset}>
+        <button className="btn danger" disabled={busy || selectedId == null} onClick={reset}>
           Reset
         </button>
       </div>
@@ -202,8 +335,8 @@ function TrackpadSection() {
       {error && <p className="error">{error}</p>}
 
       {devices.length > 0 && (
-        <label>
-          Device:
+        <label className="device-select">
+          <span>Device</span>
           <select value={selectedId ?? ""} onChange={(e) => setSelectedId(Number(e.target.value))}>
             {devices.map((d) => (
               <option key={d.id} value={d.id}>
@@ -215,7 +348,46 @@ function TrackpadSection() {
       )}
 
       {selected && (
-        <pre>{JSON.stringify(formatDevice(selected), null, 2)}</pre>
+        <>
+          <p className="hint">
+            All fields are editable in UI. Firmware RPC apply currently supports <code>sleep/reset</code> only.
+          </p>
+          <div className="grid">
+            {BOOL_FIELDS.map((k) => (
+              <label key={String(k)} className="field">
+                <span>{k}</span>
+                <input
+                  type="checkbox"
+                  checked={Boolean(draft?.[k])}
+                  onChange={(e) => updateDraft({ [k]: e.target.checked } as Partial<TrackpadDevice>)}
+                />
+              </label>
+            ))}
+            <label className="field">
+              <span>sensitivity</span>
+              <select
+                value={draft?.sensitivity ?? Sensitivity.SENSITIVITY_1X}
+                onChange={(e) => updateDraft({ sensitivity: Number(e.target.value) as Sensitivity })}
+              >
+                <option value={Sensitivity.SENSITIVITY_1X}>1X</option>
+                <option value={Sensitivity.SENSITIVITY_2X}>2X</option>
+                <option value={Sensitivity.SENSITIVITY_3X}>3X</option>
+                <option value={Sensitivity.SENSITIVITY_4X}>4X</option>
+              </select>
+            </label>
+            {NUMBER_FIELDS.map((k) => (
+              <label key={String(k)} className="field">
+                <span>{k}</span>
+                <input
+                  type="number"
+                  value={Number(draft?.[k] ?? 0)}
+                  onChange={(e) => updateDraft({ [k]: Number(e.target.value) } as Partial<TrackpadDevice>)}
+                />
+              </label>
+            ))}
+          </div>
+          <pre>{JSON.stringify(formatDevice(draft ?? selected), null, 2)}</pre>
+        </>
       )}
     </section>
   );

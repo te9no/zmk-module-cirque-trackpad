@@ -564,7 +564,11 @@ static bool dya_trackpad_rpc_handle_request(const zmk_custom_CallRequest *raw_re
     pb_istream_t req_stream =
         pb_istream_from_buffer(raw_request->payload->bytes, raw_request->payload->size);
     if (!pb_decode(&req_stream, dya_trackpad_Request_fields, &req)) {
-        set_error(resp, "Failed to decode request");
+        char message[96];
+
+        snprintf(message, sizeof(message), "Failed to decode request: %s",
+                 PB_GET_ERROR(&req_stream));
+        set_error(resp, message);
         LOG_WRN("Failed to decode trackpad request: %s", PB_GET_ERROR(&req_stream));
         return true;
     }

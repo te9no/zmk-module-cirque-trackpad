@@ -41,6 +41,52 @@ const NUMBER_FIELDS: Array<keyof TrackpadDevice> = [
   "scrollStep",
 ];
 
+function encodeVarint(value: number): number[] {
+  const bytes: number[] = [];
+  let next = value >>> 0;
+  while (next > 0x7f) {
+    bytes.push((next & 0x7f) | 0x80);
+    next >>>= 7;
+  }
+  bytes.push(next);
+  return bytes;
+}
+
+function encodeUint32Field(fieldNumber: number, value: number): number[] {
+  return [...encodeVarint(fieldNumber << 3), ...encodeVarint(value)];
+}
+
+function encodeBoolField(fieldNumber: number, value: boolean): number[] {
+  return [...encodeVarint(fieldNumber << 3), value ? 1 : 0];
+}
+
+function encodeMessageField(fieldNumber: number, payload: number[]): Uint8Array {
+  return Uint8Array.from([
+    ...encodeVarint((fieldNumber << 3) | 2),
+    ...encodeVarint(payload.length),
+    ...payload,
+  ]);
+}
+
+function encodeTrackpadRequest(request: Request): Uint8Array {
+  if (request.listDevices !== undefined) {
+    return encodeMessageField(1, []);
+  }
+  if (request.getDevice !== undefined) {
+    return encodeMessageField(2, encodeUint32Field(1, request.getDevice.id));
+  }
+  if (request.setSleep !== undefined) {
+    return encodeMessageField(3, [
+      ...encodeUint32Field(1, request.setSleep.id),
+      ...encodeBoolField(2, request.setSleep.enabled),
+    ]);
+  }
+  if (request.resetDevice !== undefined) {
+    return encodeMessageField(4, encodeUint32Field(1, request.resetDevice.id));
+  }
+  throw new Error("Empty trackpad request");
+}
+
 const DEMO_DEVICES: TrackpadDevice[] = [
   {
     id: 0,
@@ -192,7 +238,7 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
       throw new Error("No connection");
     }
     const service = new ZMKCustomSubsystem(conn, subsystem.index);
-    const payload = Request.encode(request).finish();
+    const payload = encodeTrackpadRequest(request);
     const respPayload = await service.callRPC(payload);
     if (!respPayload) {
       throw new Error("Empty RPC response");

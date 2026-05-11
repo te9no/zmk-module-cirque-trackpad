@@ -1,5 +1,6 @@
 import { useContext, useMemo, useState } from "react";
 import { connect as serialConnect } from "@zmkfirmware/zmk-studio-ts-client/transport/serial";
+import { connect as gattConnect } from "@zmkfirmware/zmk-studio-ts-client/transport/gatt";
 import {
   ZMKAppContext,
   ZMKConnection,
@@ -118,9 +119,18 @@ export function App() {
             <section className="card accent">
               {isLoading && <p>Connecting...</p>}
               {error && <p className="error">{error}</p>}
-              <button className="btn primary" disabled={isLoading} onClick={() => connect(serialConnect)}>
-                Connect Serial
-              </button>
+              <div className="row">
+                <button
+                  className="btn primary"
+                  disabled={isLoading}
+                  onClick={() => connect(gattConnect)}
+                >
+                  Connect Bluetooth
+                </button>
+                <button className="btn" disabled={isLoading} onClick={() => connect(serialConnect)}>
+                  Connect Serial
+                </button>
+              </div>
             </section>
           )}
           renderConnected={({ disconnect, deviceName }) => (

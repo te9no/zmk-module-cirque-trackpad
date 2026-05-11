@@ -43,6 +43,10 @@ export interface TrackpadDevice {
   tapMoveThreshold: number;
   scrollStep: number;
   ready: boolean;
+  inertiaEnabled: boolean;
+  inertiaDecay: number;
+  inertiaMinVelocity: number;
+  inertiaMaxTicks: number;
 }
 
 export interface ListDevicesRequest {
@@ -121,6 +125,10 @@ function createBaseTrackpadDevice(): TrackpadDevice {
     tapMoveThreshold: 0,
     scrollStep: 0,
     ready: false,
+    inertiaEnabled: false,
+    inertiaDecay: 0,
+    inertiaMinVelocity: 0,
+    inertiaMaxTicks: 0,
   };
 }
 
@@ -200,6 +208,18 @@ export const TrackpadDevice: MessageFns<TrackpadDevice> = {
     }
     if (message.ready !== false) {
       writer.uint32(200).bool(message.ready);
+    }
+    if (message.inertiaEnabled !== false) {
+      writer.uint32(208).bool(message.inertiaEnabled);
+    }
+    if (message.inertiaDecay !== 0) {
+      writer.uint32(216).uint32(message.inertiaDecay);
+    }
+    if (message.inertiaMinVelocity !== 0) {
+      writer.uint32(224).uint32(message.inertiaMinVelocity);
+    }
+    if (message.inertiaMaxTicks !== 0) {
+      writer.uint32(232).uint32(message.inertiaMaxTicks);
     }
     return writer;
   },
@@ -411,6 +431,38 @@ export const TrackpadDevice: MessageFns<TrackpadDevice> = {
           message.ready = reader.bool();
           continue;
         }
+        case 26: {
+          if (tag !== 208) {
+            break;
+          }
+
+          message.inertiaEnabled = reader.bool();
+          continue;
+        }
+        case 27: {
+          if (tag !== 216) {
+            break;
+          }
+
+          message.inertiaDecay = reader.uint32();
+          continue;
+        }
+        case 28: {
+          if (tag !== 224) {
+            break;
+          }
+
+          message.inertiaMinVelocity = reader.uint32();
+          continue;
+        }
+        case 29: {
+          if (tag !== 232) {
+            break;
+          }
+
+          message.inertiaMaxTicks = reader.uint32();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -450,6 +502,10 @@ export const TrackpadDevice: MessageFns<TrackpadDevice> = {
     message.tapMoveThreshold = object.tapMoveThreshold ?? 0;
     message.scrollStep = object.scrollStep ?? 0;
     message.ready = object.ready ?? false;
+    message.inertiaEnabled = object.inertiaEnabled ?? false;
+    message.inertiaDecay = object.inertiaDecay ?? 0;
+    message.inertiaMinVelocity = object.inertiaMinVelocity ?? 0;
+    message.inertiaMaxTicks = object.inertiaMaxTicks ?? 0;
     return message;
   },
 };

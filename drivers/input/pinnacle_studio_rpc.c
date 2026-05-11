@@ -237,6 +237,10 @@ static void fill_device_info(const struct device *dev, uint32_t id, dya_trackpad
     out->tapMoveThreshold = cfg->tap_move_threshold;
     out->scrollStep = cfg->scroll_step;
     out->ready = device_is_ready(dev);
+    out->inertiaEnabled = cfg->inertia_enabled;
+    out->inertiaDecay = cfg->inertia_decay;
+    out->inertiaMinVelocity = cfg->inertia_min_velocity;
+    out->inertiaMaxTicks = cfg->inertia_max_ticks;
 }
 
 static int fill_first_local_device(dya_trackpad_TrackpadDevice *out) {
@@ -331,6 +335,10 @@ static int apply_local_device_by_id(const dya_trackpad_TrackpadDevice *device) {
     cfg->double_tap_ms = MIN(device->doubleTapMs, UINT16_MAX);
     cfg->tap_move_threshold = MIN(device->tapMoveThreshold, UINT16_MAX);
     cfg->scroll_step = MAX(1U, MIN(device->scrollStep, UINT16_MAX));
+    cfg->inertia_enabled = device->inertiaEnabled;
+    cfg->inertia_decay = CLAMP(device->inertiaDecay, 1U, 999U);
+    cfg->inertia_min_velocity = MAX(1U, MIN(device->inertiaMinVelocity, UINT16_MAX));
+    cfg->inertia_max_ticks = MAX(1U, MIN(device->inertiaMaxTicks, UINT16_MAX));
 
     return pinnacle_apply_runtime_config(dev, hardware_tuning);
 #else

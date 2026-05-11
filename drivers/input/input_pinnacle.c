@@ -364,6 +364,86 @@ static void pinnacle_handle_tap_release(const struct device *dev, int64_t now_ms
     }
 }
 
+static void pinnacle_clear_inertia(const struct device *dev) {
+    struct pinnacle_data *data = dev->data;
+
+    data->inertia_active = false;
+    data->inertia_vx = 0;
+    data->inertia_vy = 0;
+    data->inertia_rem_x = 0;
+    data->inertia_rem_y = 0;
+    data->inertia_ticks = 0;
+}
+
+static void pinnacle_stop_inertia(const struct device *dev) {
+    struct pinnacle_data *data = dev->data;
+
+    pinnacle_clear_inertia(dev);
+    k_work_cancel_delayable(&data->inertia_work);
+}
+
+static void pinnacle_inertia_work_cb(struct k_work *work) {
+    struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+    struct pinnacle_data *data = CONTAINER_OF(dwork, struct pinnacle_data, inertia_work);
+    const struct device *dev = data->dev;
+    const struct pinnacle_config *config = dev->config;
+
+    if (!data->inertia_active || data->touching || !config->inertia_enabled) {
+        pinnacle_clear_inertia(dev);
+        return;
+    }
+
+    const uint16_t max_ticks = config->inertia_max_ticks ? config->inertia_max_ticks : 1;
+    if (data->inertia_ticks++ >= max_ticks) {
+        pinnacle_clear_inertia(dev);
+        return;
+    }
+
+    const uint16_t decay = CLAMP(config->inertia_decay, 1, 999);
+    data->inertia_vx = (data->inertia_vx * decay) / 1000;
+    data->inertia_vy = (data->inertia_vy * decay) / 1000;
+
+    const uint16_t min_velocity = config->inertia_min_velocity ? config->inertia_min_velocity : 1000;
+    if (ABS(data->inertia_vx) < min_velocity && ABS(data->inertia_vy) < min_velocity) {
+        pinnacle_clear_inertia(dev);
+        return;
+    }
+
+    data->inertia_rem_x += data->inertia_vx;
+    data->inertia_rem_y += data->inertia_vy;
+    const int32_t rel_x = data->inertia_rem_x / 1000;
+    const int32_t rel_y = data->inertia_rem_y / 1000;
+    if (rel_x == 0 && rel_y == 0) {
+        k_work_schedule(&data->inertia_work, K_MSEC(16));
+        return;
+    }
+    data->inertia_rem_x -= rel_x * 1000;
+    data->inertia_rem_y -= rel_y * 1000;
+
+    input_report_rel(dev, INPUT_REL_X, rel_x, false, K_FOREVER);
+    input_report_rel(dev, INPUT_REL_Y, rel_y, true, K_FOREVER);
+    k_work_schedule(&data->inertia_work, K_MSEC(16));
+}
+
+static void pinnacle_start_inertia(const struct device *dev) {
+    const struct pinnacle_config *config = dev->config;
+    struct pinnacle_data *data = dev->data;
+
+    if (!config->inertia_enabled || data->drag_active || data->scroll_active || !data->moved_since_touch ||
+        (data->last_dx == 0 && data->last_dy == 0)) {
+        pinnacle_stop_inertia(dev);
+        return;
+    }
+
+    data->inertia_vx = data->last_dx;
+    data->inertia_vy = data->last_dy;
+    data->inertia_rem_x = 0;
+    data->inertia_rem_y = 0;
+    data->inertia_ticks = 0;
+    data->inertia_active = true;
+    k_work_schedule(&data->inertia_work, K_MSEC(16));
+}
+
 static void pinnacle_report_abs_gestures(const struct device *dev) {
     const struct pinnacle_config *config = dev->config;
     struct pinnacle_data *data = dev->data;
@@ -398,14 +478,18 @@ static void pinnacle_report_abs_gestures(const struct device *dev) {
     if (!touching) {
         if (data->touching) {
             pinnacle_handle_tap_release(dev, now_ms);
+            pinnacle_start_inertia(dev);
         }
         data->touching = false;
         data->scroll_active = false;
         data->scroll_accum = 0;
+        data->last_dx = 0;
+        data->last_dy = 0;
         return;
     }
 
     if (!data->touching) {
+        pinnacle_stop_inertia(dev);
         data->touching = true;
         data->moved_since_touch = false;
         data->scroll_active = pinnacle_in_edge_scroll_zone(dev, sample.x, sample.y);
@@ -447,9 +531,15 @@ static void pinnacle_report_abs_gestures(const struct device *dev) {
         }
     } else {
         const uint16_t pointer_divisor = config->pointer_divisor ? config->pointer_divisor : 1;
+        const int32_t scaled_x = (dx * 1000) / pointer_divisor;
+        const int32_t scaled_y = (dy * 1000) / pointer_divisor;
+        const int32_t rel_x = scaled_x / 1000;
+        const int32_t rel_y = scaled_y / 1000;
 
-        input_report_rel(dev, INPUT_REL_X, dx / pointer_divisor, false, K_FOREVER);
-        input_report_rel(dev, INPUT_REL_Y, dy / pointer_divisor, true, K_FOREVER);
+        input_report_rel(dev, INPUT_REL_X, rel_x, false, K_FOREVER);
+        input_report_rel(dev, INPUT_REL_Y, rel_y, true, K_FOREVER);
+        data->last_dx = scaled_x;
+        data->last_dy = scaled_y;
     }
 
     data->last_x = sample.x;
@@ -715,11 +805,20 @@ int pinnacle_apply_runtime_config(const struct device *dev, bool hardware_tuning
     data->moved_since_touch = false;
     data->scroll_active = false;
     data->drag_active = false;
+    data->inertia_active = false;
     data->scroll_accum = 0;
+    data->last_dx = 0;
+    data->last_dy = 0;
+    data->inertia_vx = 0;
+    data->inertia_vy = 0;
+    data->inertia_rem_x = 0;
+    data->inertia_rem_y = 0;
+    data->inertia_ticks = 0;
     data->last_tap_ms = -1;
     pinnacle_release_drag(dev);
     k_work_cancel(&data->work);
     k_work_cancel_delayable(&data->click_work);
+    k_work_cancel_delayable(&data->inertia_work);
 
     if (hardware_tuning) {
         ret = pinnacle_set_adc_tracking_sensitivity(dev);
@@ -764,7 +863,15 @@ static int pinnacle_init(const struct device *dev) {
     data->moved_since_touch = false;
     data->scroll_active = false;
     data->drag_active = false;
+    data->inertia_active = false;
     data->scroll_accum = 0;
+    data->last_dx = 0;
+    data->last_dy = 0;
+    data->inertia_vx = 0;
+    data->inertia_vy = 0;
+    data->inertia_rem_x = 0;
+    data->inertia_rem_y = 0;
+    data->inertia_ticks = 0;
     data->last_tap_ms = -1;
     k_msleep(10);
     ret = pinnacle_write(dev, PINNACLE_STATUS1, 0); // Clear CC
@@ -873,6 +980,7 @@ static int pinnacle_init(const struct device *dev) {
 
     k_work_init(&data->work, pinnacle_work_cb);
     k_work_init_delayable(&data->click_work, pinnacle_deferred_click_cb);
+    k_work_init_delayable(&data->inertia_work, pinnacle_inertia_work_cb);
 
     pinnacle_write(dev, PINNACLE_FEED_CFG1, feed_cfg1);
 
@@ -884,8 +992,13 @@ static int pinnacle_init(const struct device *dev) {
 #if IS_ENABLED(CONFIG_PM_DEVICE)
 
 static int pinnacle_pm_action(const struct device *dev, enum pm_device_action action) {
+    struct pinnacle_data *data = dev->data;
+
     switch (action) {
     case PM_DEVICE_ACTION_SUSPEND:
+        pinnacle_stop_inertia(dev);
+        k_work_cancel(&data->work);
+        k_work_cancel_delayable(&data->click_work);
         return set_int(dev, false);
     case PM_DEVICE_ACTION_RESUME:
         return set_int(dev, true);
@@ -928,6 +1041,10 @@ static int pinnacle_pm_action(const struct device *dev, enum pm_device_action ac
         .double_tap_ms = DT_INST_PROP_OR(n, double_tap_ms, 350),                                   \
         .tap_move_threshold = DT_INST_PROP_OR(n, tap_move_threshold, 80),                           \
         .scroll_step = DT_INST_PROP_OR(n, scroll_step, 160),                                       \
+        .inertia_enabled = DT_INST_PROP(n, inertia_enabled),                                       \
+        .inertia_decay = DT_INST_PROP_OR(n, inertia_decay, 850),                                   \
+        .inertia_min_velocity = DT_INST_PROP_OR(n, inertia_min_velocity, 1000),                     \
+        .inertia_max_ticks = DT_INST_PROP_OR(n, inertia_max_ticks, 24),                             \
         .sensitivity = DT_INST_ENUM_IDX_OR(n, sensitivity, PINNACLE_SENSITIVITY_1X),               \
         .dr = GPIO_DT_SPEC_GET_OR(DT_DRV_INST(n), dr_gpios, {}),                                   \
     };                                                                                             \

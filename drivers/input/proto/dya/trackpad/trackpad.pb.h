@@ -44,6 +44,10 @@ typedef struct _dya_trackpad_TrackpadDevice {
     uint32_t tapMoveThreshold;
     uint32_t scrollStep;
     bool ready;
+    bool inertiaEnabled;
+    uint32_t inertiaDecay;
+    uint32_t inertiaMinVelocity;
+    uint32_t inertiaMaxTicks;
 } dya_trackpad_TrackpadDevice;
 
 typedef struct _dya_trackpad_ListDevicesRequest {
@@ -136,7 +140,7 @@ extern "C" {
 
 
 /* Initializer values for message structs */
-#define dya_trackpad_TrackpadDevice_init_default {0, "", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, _dya_trackpad_Sensitivity_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+#define dya_trackpad_TrackpadDevice_init_default {0, "", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, _dya_trackpad_Sensitivity_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define dya_trackpad_ListDevicesRequest_init_default {0}
 #define dya_trackpad_ListDevicesResponse_init_default {{{NULL}, NULL}}
 #define dya_trackpad_GetDeviceRequest_init_default {0}
@@ -149,7 +153,7 @@ extern "C" {
 #define dya_trackpad_ErrorResponse_init_default  {""}
 #define dya_trackpad_Request_init_default        {0, {dya_trackpad_ListDevicesRequest_init_default}}
 #define dya_trackpad_Response_init_default       {0, {dya_trackpad_ErrorResponse_init_default}}
-#define dya_trackpad_TrackpadDevice_init_zero    {0, "", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, _dya_trackpad_Sensitivity_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+#define dya_trackpad_TrackpadDevice_init_zero    {0, "", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, _dya_trackpad_Sensitivity_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define dya_trackpad_ListDevicesRequest_init_zero {0}
 #define dya_trackpad_ListDevicesResponse_init_zero {{{NULL}, NULL}}
 #define dya_trackpad_GetDeviceRequest_init_zero  {0}
@@ -189,6 +193,10 @@ extern "C" {
 #define dya_trackpad_TrackpadDevice_tapMoveThreshold_tag 23
 #define dya_trackpad_TrackpadDevice_scrollStep_tag 24
 #define dya_trackpad_TrackpadDevice_ready_tag    25
+#define dya_trackpad_TrackpadDevice_inertiaEnabled_tag 26
+#define dya_trackpad_TrackpadDevice_inertiaDecay_tag 27
+#define dya_trackpad_TrackpadDevice_inertiaMinVelocity_tag 28
+#define dya_trackpad_TrackpadDevice_inertiaMaxTicks_tag 29
 #define dya_trackpad_ListDevicesResponse_devices_tag 1
 #define dya_trackpad_GetDeviceRequest_id_tag     1
 #define dya_trackpad_GetDeviceResponse_device_tag 1
@@ -234,7 +242,11 @@ X(a, STATIC,   SINGULAR, UINT32,   tapTimeoutMs,     21) \
 X(a, STATIC,   SINGULAR, UINT32,   doubleTapMs,      22) \
 X(a, STATIC,   SINGULAR, UINT32,   tapMoveThreshold,  23) \
 X(a, STATIC,   SINGULAR, UINT32,   scrollStep,       24) \
-X(a, STATIC,   SINGULAR, BOOL,     ready,            25)
+X(a, STATIC,   SINGULAR, BOOL,     ready,            25) \
+X(a, STATIC,   SINGULAR, BOOL,     inertiaEnabled,  26) \
+X(a, STATIC,   SINGULAR, UINT32,   inertiaDecay,    27) \
+X(a, STATIC,   SINGULAR, UINT32,   inertiaMinVelocity,  28) \
+X(a, STATIC,   SINGULAR, UINT32,   inertiaMaxTicks,  29)
 #define dya_trackpad_TrackpadDevice_CALLBACK NULL
 #define dya_trackpad_TrackpadDevice_DEFAULT NULL
 

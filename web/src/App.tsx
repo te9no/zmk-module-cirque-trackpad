@@ -27,6 +27,7 @@ const BOOL_FIELDS: Array<keyof TrackpadDevice> = [
   "tapToClick",
   "doubleTapDrag",
   "reverseCircularScroll",
+  "inertiaEnabled",
 ];
 
 const NUMBER_FIELDS: Array<keyof TrackpadDevice> = [
@@ -41,6 +42,9 @@ const NUMBER_FIELDS: Array<keyof TrackpadDevice> = [
   "doubleTapMs",
   "tapMoveThreshold",
   "scrollStep",
+  "inertiaDecay",
+  "inertiaMinVelocity",
+  "inertiaMaxTicks",
 ];
 
 function encodeVarint(value: number): number[] {
@@ -116,6 +120,10 @@ function encodeTrackpadDevice(device: TrackpadDevice): number[] {
   pushUint32Field(out, 23, device.tapMoveThreshold);
   pushUint32Field(out, 24, device.scrollStep);
   pushBoolField(out, 25, device.ready);
+  pushBoolField(out, 26, device.inertiaEnabled);
+  pushUint32Field(out, 27, device.inertiaDecay);
+  pushUint32Field(out, 28, device.inertiaMinVelocity);
+  pushUint32Field(out, 29, device.inertiaMaxTicks);
   return out;
 }
 
@@ -167,6 +175,10 @@ const DEMO_DEVICES: TrackpadDevice[] = [
     doubleTapMs: 350,
     tapMoveThreshold: 80,
     scrollStep: 160,
+    inertiaEnabled: true,
+    inertiaDecay: 850,
+    inertiaMinVelocity: 1000,
+    inertiaMaxTicks: 24,
     ready: true,
   },
   {
@@ -194,6 +206,10 @@ const DEMO_DEVICES: TrackpadDevice[] = [
     doubleTapMs: 300,
     tapMoveThreshold: 70,
     scrollStep: 140,
+    inertiaEnabled: false,
+    inertiaDecay: 850,
+    inertiaMinVelocity: 1000,
+    inertiaMaxTicks: 24,
     ready: true,
   },
 ];

@@ -35,6 +35,10 @@ message TrackpadDevice {
   uint32 tapMoveThreshold = 23;
   uint32 scrollStep = 24;
   bool ready = 25;
+  bool inertiaEnabled = 26;
+  uint32 inertiaDecay = 27;
+  uint32 inertiaMinVelocity = 28;
+  uint32 inertiaMaxTicks = 29;
 }
 
 message ListDevicesRequest {}

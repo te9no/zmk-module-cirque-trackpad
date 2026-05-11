@@ -76,3 +76,18 @@ properties:
     type: int
     default: 160
     description: Raw edge perimeter delta per emitted wheel tick.
+  inertia-enabled:
+    type: boolean
+    description: Continue pointer movement briefly after release in absolute gesture mode.
+  inertia-decay:
+    type: int
+    default: 850
+    description: Per-frame velocity multiplier in permille for inertial pointer movement.
+  inertia-min-velocity:
+    type: int
+    default: 1000
+    description: Minimum milli-pixel velocity before inertial pointer movement stops.
+  inertia-max-ticks:
+    type: int
+    default: 24
+    description: Maximum number of 16ms inertial pointer frames after release.

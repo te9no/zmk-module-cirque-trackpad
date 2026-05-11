@@ -595,13 +595,23 @@ static int pinnacle_force_recalibrate(const struct device *dev) {
     ret = pinnacle_write(dev, PINNACLE_CAL_CFG, val);
     if (ret < 0) {
         LOG_ERR("Failed to force calibration %d", ret);
+        return ret;
     }
 
-    do {
-        pinnacle_seq_read(dev, PINNACLE_CAL_CFG, &val, 1);
-    } while (val & 0x01);
+    for (int i = 0; i < 100; i++) {
+        ret = pinnacle_seq_read(dev, PINNACLE_CAL_CFG, &val, 1);
+        if (ret < 0) {
+            LOG_ERR("Failed to poll calibration %d", ret);
+            return ret;
+        }
+        if ((val & 0x01) == 0) {
+            return 0;
+        }
+        k_msleep(1);
+    }
 
-    return ret;
+    LOG_WRN("Calibration timeout");
+    return -ETIMEDOUT;
 }
 
 int pinnacle_set_sleep(const struct device *dev, bool enabled) {

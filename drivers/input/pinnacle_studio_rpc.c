@@ -681,6 +681,9 @@ static int handle_set_device(const dya_trackpad_SetDeviceRequest *req, dya_track
     if (rc == -ENOENT) {
         rc = call_split_trackpad(TRACKPAD_SPLIT_REQUEST_SET_DEVICE, (uint8_t)req->device.id, false,
                                  &req->device, &result.device);
+        if (rc == 0) {
+            result.has_device = true;
+        }
     }
 #endif
 

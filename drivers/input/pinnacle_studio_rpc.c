@@ -8,6 +8,7 @@
 #include <string.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/settings/settings.h>
 #include <zephyr/sys/iterable_sections.h>
 #include <zephyr/sys/util.h>
 #include <trackpad.pb.h>
@@ -286,6 +287,142 @@ static int reset_local_device_by_id(uint32_t id) {
     return 0;
 }
 
+#if IS_ENABLED(CONFIG_SETTINGS) && IS_ENABLED(CONFIG_INPUT_PINNACLE)
+
+#define TRACKPAD_SETTINGS_VERSION 1
+#define TRACKPAD_SETTINGS_PREFIX "dya/trackpad"
+
+struct trackpad_persisted_config {
+    uint8_t version;
+    bool rotate_90;
+    bool x_invert;
+    bool y_invert;
+    bool sleep_en;
+    bool no_taps;
+    bool no_secondary_tap;
+    bool absolute_gestures;
+    bool tap_to_click;
+    bool double_tap_drag;
+    bool reverse_circular_scroll;
+    bool inertia_enabled;
+    uint8_t sensitivity;
+    uint8_t x_axis_z_min;
+    uint8_t y_axis_z_min;
+    uint8_t touch_z_threshold;
+    uint16_t x_max;
+    uint16_t y_max;
+    uint16_t edge_scroll_margin;
+    uint16_t pointer_divisor;
+    uint16_t tap_timeout_ms;
+    uint16_t double_tap_ms;
+    uint16_t tap_move_threshold;
+    uint16_t scroll_step;
+    uint16_t inertia_decay;
+    uint16_t inertia_min_velocity;
+    uint16_t inertia_max_ticks;
+};
+
+static bool trackpad_settings_loading;
+
+static int local_device_id(const struct device *dev, uint32_t *id) {
+    for (size_t i = 0; i < ARRAY_SIZE(pinnacle_devices); i++) {
+        if (pinnacle_devices[i] == dev) {
+            *id = (uint32_t)i;
+            return 0;
+        }
+    }
+
+    return -ENOENT;
+}
+
+static void persisted_from_config(const struct pinnacle_config *cfg,
+                                  struct trackpad_persisted_config *saved) {
+    *saved = (struct trackpad_persisted_config){
+        .version = TRACKPAD_SETTINGS_VERSION,
+        .rotate_90 = cfg->rotate_90,
+        .x_invert = cfg->x_invert,
+        .y_invert = cfg->y_invert,
+        .sleep_en = cfg->sleep_en,
+        .no_taps = cfg->no_taps,
+        .no_secondary_tap = cfg->no_secondary_tap,
+        .absolute_gestures = cfg->absolute_gestures,
+        .tap_to_click = cfg->tap_to_click,
+        .double_tap_drag = cfg->double_tap_drag,
+        .reverse_circular_scroll = cfg->reverse_circular_scroll,
+        .inertia_enabled = cfg->inertia_enabled,
+        .sensitivity = (uint8_t)cfg->sensitivity,
+        .x_axis_z_min = cfg->x_axis_z_min,
+        .y_axis_z_min = cfg->y_axis_z_min,
+        .touch_z_threshold = cfg->touch_z_threshold,
+        .x_max = cfg->x_max,
+        .y_max = cfg->y_max,
+        .edge_scroll_margin = cfg->edge_scroll_margin,
+        .pointer_divisor = cfg->pointer_divisor,
+        .tap_timeout_ms = cfg->tap_timeout_ms,
+        .double_tap_ms = cfg->double_tap_ms,
+        .tap_move_threshold = cfg->tap_move_threshold,
+        .scroll_step = cfg->scroll_step,
+        .inertia_decay = cfg->inertia_decay,
+        .inertia_min_velocity = cfg->inertia_min_velocity,
+        .inertia_max_ticks = cfg->inertia_max_ticks,
+    };
+}
+
+static void device_from_persisted(uint32_t id, const struct trackpad_persisted_config *saved,
+                                  dya_trackpad_TrackpadDevice *device) {
+    *device = (dya_trackpad_TrackpadDevice)dya_trackpad_TrackpadDevice_init_zero;
+    device->id = id;
+    device->rotate90 = saved->rotate_90;
+    device->xInvert = saved->x_invert;
+    device->yInvert = saved->y_invert;
+    device->sleep = saved->sleep_en;
+    device->noTaps = saved->no_taps;
+    device->noSecondaryTap = saved->no_secondary_tap;
+    device->absoluteGestures = saved->absolute_gestures;
+    device->tapToClick = saved->tap_to_click;
+    device->doubleTapDrag = saved->double_tap_drag;
+    device->reverseCircularScroll = saved->reverse_circular_scroll;
+    device->inertiaEnabled = saved->inertia_enabled;
+    device->sensitivity = (dya_trackpad_Sensitivity)saved->sensitivity;
+    device->xAxisZMin = saved->x_axis_z_min;
+    device->yAxisZMin = saved->y_axis_z_min;
+    device->touchZThreshold = saved->touch_z_threshold;
+    device->xMax = saved->x_max;
+    device->yMax = saved->y_max;
+    device->edgeScrollMargin = saved->edge_scroll_margin;
+    device->pointerDivisor = saved->pointer_divisor;
+    device->tapTimeoutMs = saved->tap_timeout_ms;
+    device->doubleTapMs = saved->double_tap_ms;
+    device->tapMoveThreshold = saved->tap_move_threshold;
+    device->scrollStep = saved->scroll_step;
+    device->inertiaDecay = saved->inertia_decay;
+    device->inertiaMinVelocity = saved->inertia_min_velocity;
+    device->inertiaMaxTicks = saved->inertia_max_ticks;
+}
+
+static int save_local_device_settings(const struct device *dev) {
+    uint32_t id;
+    int rc = local_device_id(dev, &id);
+    if (rc != 0) {
+        return rc;
+    }
+
+    char key[32];
+    struct trackpad_persisted_config saved;
+    const struct pinnacle_config *cfg = dev->config;
+
+    persisted_from_config(cfg, &saved);
+    snprintf(key, sizeof(key), TRACKPAD_SETTINGS_PREFIX "/%u", id);
+    rc = settings_save_one(key, &saved, sizeof(saved));
+    if (rc != 0) {
+        LOG_ERR("Failed to save trackpad settings %s: %d", key, rc);
+    }
+
+    return rc;
+}
+
+#endif
+
 static int set_local_sleep_by_id(uint32_t id, bool enabled) {
     const struct device *dev = get_device_by_id(id);
     if (dev == NULL) {
@@ -293,7 +430,19 @@ static int set_local_sleep_by_id(uint32_t id, bool enabled) {
     }
 
 #if IS_ENABLED(CONFIG_INPUT_PINNACLE)
-    return pinnacle_set_sleep(dev, enabled);
+    int rc = pinnacle_set_sleep(dev, enabled);
+    if (rc != 0) {
+        return rc;
+    }
+
+    struct pinnacle_config *cfg = (struct pinnacle_config *)dev->config;
+    cfg->sleep_en = enabled;
+#if IS_ENABLED(CONFIG_SETTINGS) && IS_ENABLED(CONFIG_INPUT_PINNACLE)
+    if (!trackpad_settings_loading) {
+        return save_local_device_settings(dev);
+    }
+#endif
+    return 0;
 #else
     return -ENODEV;
 #endif
@@ -340,11 +489,68 @@ static int apply_local_device_by_id(const dya_trackpad_TrackpadDevice *device) {
     cfg->inertia_min_velocity = MAX(1U, MIN(device->inertiaMinVelocity, UINT16_MAX));
     cfg->inertia_max_ticks = MAX(1U, MIN(device->inertiaMaxTicks, UINT16_MAX));
 
-    return pinnacle_apply_runtime_config(dev, hardware_tuning);
+    int rc = pinnacle_apply_runtime_config(dev, hardware_tuning);
+    if (rc != 0) {
+        return rc;
+    }
+
+#if IS_ENABLED(CONFIG_SETTINGS) && IS_ENABLED(CONFIG_INPUT_PINNACLE)
+    if (!trackpad_settings_loading) {
+        rc = save_local_device_settings(dev);
+        if (rc != 0) {
+            return rc;
+        }
+    }
+#endif
+
+    return 0;
 #else
     return -ENODEV;
 #endif
 }
+
+#if IS_ENABLED(CONFIG_SETTINGS) && IS_ENABLED(CONFIG_INPUT_PINNACLE)
+
+static int trackpad_settings_set(const char *name, size_t len, settings_read_cb read_cb,
+                                 void *cb_arg) {
+    const char *next;
+
+    for (size_t i = 0; i < ARRAY_SIZE(pinnacle_devices); i++) {
+        char id_key[8];
+        snprintf(id_key, sizeof(id_key), "%u", (uint32_t)i);
+
+        if (!settings_name_steq(name, id_key, &next) || next) {
+            continue;
+        }
+        if (len != sizeof(struct trackpad_persisted_config)) {
+            return -EINVAL;
+        }
+
+        struct trackpad_persisted_config saved;
+        int rc = read_cb(cb_arg, &saved, sizeof(saved));
+        if (rc <= 0) {
+            return rc;
+        }
+        if (saved.version != TRACKPAD_SETTINGS_VERSION) {
+            return -EINVAL;
+        }
+
+        dya_trackpad_TrackpadDevice device;
+        device_from_persisted((uint32_t)i, &saved, &device);
+
+        trackpad_settings_loading = true;
+        rc = apply_local_device_by_id(&device);
+        trackpad_settings_loading = false;
+        return rc;
+    }
+
+    return -ENOENT;
+}
+
+SETTINGS_STATIC_HANDLER_DEFINE(dya_trackpad, TRACKPAD_SETTINGS_PREFIX, NULL, trackpad_settings_set,
+                               NULL, NULL);
+
+#endif
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
 

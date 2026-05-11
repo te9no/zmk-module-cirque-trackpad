@@ -510,8 +510,8 @@ static int apply_local_device_by_id(const dya_trackpad_TrackpadDevice *device) {
     cfg->x_axis_z_min = MIN(device->xAxisZMin, UINT8_MAX);
     cfg->y_axis_z_min = MIN(device->yAxisZMin, UINT8_MAX);
     cfg->touch_z_threshold = MIN(device->touchZThreshold, UINT8_MAX);
-    cfg->x_max = MIN(device->xMax, UINT16_MAX);
-    cfg->y_max = MIN(device->yMax, UINT16_MAX);
+    cfg->x_max = MAX(1U, MIN(device->xMax, UINT16_MAX));
+    cfg->y_max = MAX(1U, MIN(device->yMax, UINT16_MAX));
     cfg->edge_scroll_margin = MIN(device->edgeScrollMargin, UINT16_MAX);
     cfg->pointer_divisor = MAX(1U, MIN(device->pointerDivisor, UINT16_MAX));
     cfg->tap_timeout_ms = MIN(device->tapTimeoutMs, UINT16_MAX);

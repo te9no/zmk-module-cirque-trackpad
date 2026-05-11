@@ -5,6 +5,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/spi.h>
+#include <zephyr/kernel.h>
 
 #define PINNACLE_READ 0xA0
 #define PINNACLE_WRITE 0x80
@@ -98,6 +99,7 @@ struct pinnacle_data {
     int64_t last_tap_ms;
     const struct device *dev;
     struct gpio_callback gpio_cb;
+    struct k_mutex lock;
     struct k_work work;
     struct k_work_delayable click_work;
     struct k_work_delayable inertia_work;

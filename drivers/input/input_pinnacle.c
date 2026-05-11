@@ -274,17 +274,23 @@ static void pinnacle_decode_abs_sample(const uint8_t *packet, struct pinnacle_ab
 
 static bool pinnacle_in_edge_scroll_zone(const struct device *dev, uint16_t x, uint16_t y) {
     const struct pinnacle_config *config = dev->config;
+    const uint16_t margin = MIN(config->edge_scroll_margin, MIN(config->x_max, config->y_max) / 2);
 
-    return x <= config->edge_scroll_margin || x >= (config->x_max - config->edge_scroll_margin) ||
-           y <= config->edge_scroll_margin || y >= (config->y_max - config->edge_scroll_margin);
+    if (margin == 0) {
+        return false;
+    }
+
+    return x <= margin || x >= (config->x_max - margin) || y <= margin ||
+           y >= (config->y_max - margin);
 }
 
 static int32_t pinnacle_edge_scroll_position(const struct device *dev, uint16_t x, uint16_t y) {
     const struct pinnacle_config *config = dev->config;
-    const uint16_t right_edge = config->x_max - config->edge_scroll_margin;
-    const uint16_t bottom_edge = config->y_max - config->edge_scroll_margin;
+    const uint16_t margin = MIN(config->edge_scroll_margin, MIN(config->x_max, config->y_max) / 2);
+    const uint16_t right_edge = config->x_max - margin;
+    const uint16_t bottom_edge = config->y_max - margin;
 
-    if (y <= config->edge_scroll_margin) {
+    if (y <= margin) {
         return x;
     }
     if (x >= right_edge) {
@@ -388,15 +394,16 @@ static void pinnacle_inertia_work_cb(struct k_work *work) {
     const struct device *dev = data->dev;
     const struct pinnacle_config *config = dev->config;
 
+    k_mutex_lock(&data->lock, K_FOREVER);
     if (!data->inertia_active || data->touching || !config->inertia_enabled) {
         pinnacle_clear_inertia(dev);
-        return;
+        goto done;
     }
 
     const uint16_t max_ticks = config->inertia_max_ticks ? config->inertia_max_ticks : 1;
     if (data->inertia_ticks++ >= max_ticks) {
         pinnacle_clear_inertia(dev);
-        return;
+        goto done;
     }
 
     const uint16_t decay = CLAMP(config->inertia_decay, 1, 999);
@@ -406,7 +413,7 @@ static void pinnacle_inertia_work_cb(struct k_work *work) {
     const uint16_t min_velocity = config->inertia_min_velocity ? config->inertia_min_velocity : 1000;
     if (ABS(data->inertia_vx) < min_velocity && ABS(data->inertia_vy) < min_velocity) {
         pinnacle_clear_inertia(dev);
-        return;
+        goto done;
     }
 
     data->inertia_rem_x += data->inertia_vx;
@@ -415,7 +422,7 @@ static void pinnacle_inertia_work_cb(struct k_work *work) {
     const int32_t rel_y = data->inertia_rem_y / 1000;
     if (rel_x == 0 && rel_y == 0) {
         k_work_schedule(&data->inertia_work, K_MSEC(16));
-        return;
+        goto done;
     }
     data->inertia_rem_x -= rel_x * 1000;
     data->inertia_rem_y -= rel_y * 1000;
@@ -423,6 +430,9 @@ static void pinnacle_inertia_work_cb(struct k_work *work) {
     input_report_rel(dev, INPUT_REL_X, rel_x, false, K_FOREVER);
     input_report_rel(dev, INPUT_REL_Y, rel_y, true, K_FOREVER);
     k_work_schedule(&data->inertia_work, K_MSEC(16));
+
+done:
+    k_mutex_unlock(&data->lock);
 }
 
 static void pinnacle_start_inertia(const struct device *dev) {
@@ -471,6 +481,7 @@ static void pinnacle_report_abs_gestures(const struct device *dev) {
     if (ret < 0) {
         return;
     }
+    data->in_int = false;
 
     const int64_t now_ms = k_uptime_get();
     const bool touching = sample.z >= config->touch_z_threshold;
@@ -593,7 +604,10 @@ static void pinnacle_report_data(const struct device *dev) {
     if (data->in_int) {
         LOG_DBG("Clearing status bit");
         ret = pinnacle_clear_status(dev);
-        data->in_int = true;
+        if (ret < 0) {
+            return;
+        }
+        data->in_int = false;
     }
 
     if (!config->no_taps && (btn || data->btn_cache)) {
@@ -615,7 +629,10 @@ static void pinnacle_report_data(const struct device *dev) {
 
 static void pinnacle_work_cb(struct k_work *work) {
     struct pinnacle_data *data = CONTAINER_OF(work, struct pinnacle_data, work);
+
+    k_mutex_lock(&data->lock, K_FOREVER);
     pinnacle_report_data(data->dev);
+    k_mutex_unlock(&data->lock);
 }
 
 static void pinnacle_gpio_cb(const struct device *port, struct gpio_callback *cb, uint32_t pins) {
@@ -730,7 +747,7 @@ static int pinnacle_force_recalibrate(const struct device *dev) {
     return -ETIMEDOUT;
 }
 
-int pinnacle_set_sleep(const struct device *dev, bool enabled) {
+static int pinnacle_set_sleep_locked(const struct device *dev, bool enabled) {
     uint8_t sys_cfg;
     int ret = pinnacle_seq_read(dev, PINNACLE_SYS_CFG, &sys_cfg, 1);
     if (ret < 0) {
@@ -750,6 +767,17 @@ int pinnacle_set_sleep(const struct device *dev, bool enabled) {
         LOG_ERR("can't write sleep config %d", ret);
         return ret;
     }
+
+    return ret;
+}
+
+int pinnacle_set_sleep(const struct device *dev, bool enabled) {
+    struct pinnacle_data *data = dev->data;
+    int ret;
+
+    k_mutex_lock(&data->lock, K_FOREVER);
+    ret = pinnacle_set_sleep_locked(dev, enabled);
+    k_mutex_unlock(&data->lock);
 
     return ret;
 }
@@ -801,6 +829,7 @@ int pinnacle_apply_runtime_config(const struct device *dev, bool hardware_tuning
     struct pinnacle_data *data = dev->data;
     int ret;
 
+    k_mutex_lock(&data->lock, K_FOREVER);
     data->touching = false;
     data->moved_since_touch = false;
     data->scroll_active = false;
@@ -823,26 +852,30 @@ int pinnacle_apply_runtime_config(const struct device *dev, bool hardware_tuning
     if (hardware_tuning) {
         ret = pinnacle_set_adc_tracking_sensitivity(dev);
         if (ret < 0) {
-            return ret;
+            goto done;
         }
 
         ret = pinnacle_tune_edge_sensitivity(dev);
         if (ret < 0) {
-            return ret;
+            goto done;
         }
     }
 
     ret = pinnacle_write(dev, PINNACLE_SLEEP_INTERVAL, 255);
     if (ret < 0) {
-        return ret;
+        goto done;
     }
 
     ret = pinnacle_apply_feed_config(dev);
     if (ret < 0) {
-        return ret;
+        goto done;
     }
 
-    return pinnacle_set_sleep(dev, config->sleep_en);
+    ret = pinnacle_set_sleep_locked(dev, config->sleep_en);
+
+done:
+    k_mutex_unlock(&data->lock);
+    return ret;
 }
 
 static int pinnacle_init(const struct device *dev) {
@@ -850,10 +883,27 @@ static int pinnacle_init(const struct device *dev) {
     const struct pinnacle_config *config = dev->config;
     int ret;
 
+    data->dev = dev;
+    k_mutex_init(&data->lock);
+
+#if DT_ANY_INST_ON_BUS_STATUS_OKAY(i2c)
+    if (config->seq_read == pinnacle_i2c_seq_read && !device_is_ready(config->bus.i2c.bus)) {
+        LOG_ERR("I2C bus is not ready");
+        return -ENODEV;
+    }
+#endif
+#if DT_ANY_INST_ON_BUS_STATUS_OKAY(spi)
+    if (config->seq_read == pinnacle_spi_seq_read && !device_is_ready(config->bus.spi.bus)) {
+        LOG_ERR("SPI bus is not ready");
+        return -ENODEV;
+    }
+#endif
+
     uint8_t fw_id[2];
     ret = pinnacle_seq_read(dev, PINNACLE_FW_ID, fw_id, 2);
     if (ret < 0) {
         LOG_ERR("Failed to get the FW ID %d", ret);
+        return ret;
     }
 
     LOG_DBG("Found device with FW ID: 0x%02x, Version: 0x%02x", fw_id[0], fw_id[1]);
@@ -909,13 +959,6 @@ static int pinnacle_init(const struct device *dev) {
         return ret;
     }
 
-    if (config->sleep_en) {
-        ret = pinnacle_set_sleep(dev, true);
-        if (ret < 0) {
-            return ret;
-        }
-    }
-
     uint8_t packet[1];
     ret = pinnacle_seq_read(dev, PINNACLE_SLEEP_INTERVAL, packet, 1);
 
@@ -924,53 +967,33 @@ static int pinnacle_init(const struct device *dev) {
     }
 
     ret = pinnacle_write(dev, PINNACLE_SLEEP_INTERVAL, 255);
-    if (ret <= 0) {
-        LOG_DBG("Failed to update sleep interaval %d", ret);
-    }
-
-    uint8_t feed_cfg2 = config->absolute_gestures ? PINNACLE_FEED_CFG2_DIS_TAP
-                                                  : (PINNACLE_FEED_CFG2_EN_IM |
-                                                     PINNACLE_FEED_CFG2_EN_BTN_SCRL);
-    if (config->no_taps) {
-        feed_cfg2 |= PINNACLE_FEED_CFG2_DIS_TAP;
-    }
-
-    if (config->no_secondary_tap) {
-        feed_cfg2 |= PINNACLE_FEED_CFG2_DIS_SEC;
-    }
-
-    if (config->rotate_90) {
-        feed_cfg2 |= PINNACLE_FEED_CFG2_ROTATE_90;
-    }
-    ret = pinnacle_write(dev, PINNACLE_FEED_CFG2, feed_cfg2);
     if (ret < 0) {
-        LOG_ERR("can't write %d", ret);
-        return ret;
-    }
-    uint8_t feed_cfg1 = PINNACLE_FEED_CFG1_EN_FEED;
-    if (config->absolute_gestures) {
-        feed_cfg1 |= PINNACLE_FEED_CFG1_ABS_MODE;
-    }
-    if (config->x_invert) {
-        feed_cfg1 |= PINNACLE_FEED_CFG1_INV_X;
-    }
-
-    if (config->y_invert) {
-        feed_cfg1 |= PINNACLE_FEED_CFG1_INV_Y;
-    }
-    if (feed_cfg1) {
-        ret = pinnacle_write(dev, PINNACLE_FEED_CFG1, feed_cfg1);
-    }
-    if (ret < 0) {
-        LOG_ERR("can't write %d", ret);
+        LOG_ERR("Failed to update sleep interval %d", ret);
         return ret;
     }
 
-    data->dev = dev;
+    ret = pinnacle_apply_feed_config(dev);
+    if (ret < 0) {
+        return ret;
+    }
+
+    ret = pinnacle_set_sleep_locked(dev, config->sleep_en);
+    if (ret < 0) {
+        return ret;
+    }
 
     pinnacle_clear_status(dev);
 
-    gpio_pin_configure_dt(&config->dr, GPIO_INPUT);
+    if (!gpio_is_ready_dt(&config->dr)) {
+        LOG_ERR("DR GPIO is not ready");
+        return -ENODEV;
+    }
+
+    ret = gpio_pin_configure_dt(&config->dr, GPIO_INPUT);
+    if (ret < 0) {
+        LOG_ERR("Failed to configure DR GPIO: %d", ret);
+        return ret;
+    }
     gpio_init_callback(&data->gpio_cb, pinnacle_gpio_cb, BIT(config->dr.pin));
     ret = gpio_add_callback(config->dr.port, &data->gpio_cb);
     if (ret < 0) {
@@ -982,9 +1005,10 @@ static int pinnacle_init(const struct device *dev) {
     k_work_init_delayable(&data->click_work, pinnacle_deferred_click_cb);
     k_work_init_delayable(&data->inertia_work, pinnacle_inertia_work_cb);
 
-    pinnacle_write(dev, PINNACLE_FEED_CFG1, feed_cfg1);
-
-    set_int(dev, true);
+    ret = set_int(dev, true);
+    if (ret < 0) {
+        return ret;
+    }
 
     return 0;
 }

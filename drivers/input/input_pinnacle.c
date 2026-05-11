@@ -628,6 +628,89 @@ int pinnacle_set_sleep(const struct device *dev, bool enabled) {
     return ret;
 }
 
+static int pinnacle_apply_feed_config(const struct device *dev) {
+    const struct pinnacle_config *config = dev->config;
+    int ret;
+
+    uint8_t feed_cfg2 = config->absolute_gestures ? PINNACLE_FEED_CFG2_DIS_TAP
+                                                  : (PINNACLE_FEED_CFG2_EN_IM |
+                                                     PINNACLE_FEED_CFG2_EN_BTN_SCRL);
+    if (config->no_taps) {
+        feed_cfg2 |= PINNACLE_FEED_CFG2_DIS_TAP;
+    }
+    if (config->no_secondary_tap) {
+        feed_cfg2 |= PINNACLE_FEED_CFG2_DIS_SEC;
+    }
+    if (config->rotate_90) {
+        feed_cfg2 |= PINNACLE_FEED_CFG2_ROTATE_90;
+    }
+
+    ret = pinnacle_write(dev, PINNACLE_FEED_CFG2, feed_cfg2);
+    if (ret < 0) {
+        LOG_ERR("can't write feed cfg2 %d", ret);
+        return ret;
+    }
+
+    uint8_t feed_cfg1 = PINNACLE_FEED_CFG1_EN_FEED;
+    if (config->absolute_gestures) {
+        feed_cfg1 |= PINNACLE_FEED_CFG1_ABS_MODE;
+    }
+    if (config->x_invert) {
+        feed_cfg1 |= PINNACLE_FEED_CFG1_INV_X;
+    }
+    if (config->y_invert) {
+        feed_cfg1 |= PINNACLE_FEED_CFG1_INV_Y;
+    }
+
+    ret = pinnacle_write(dev, PINNACLE_FEED_CFG1, feed_cfg1);
+    if (ret < 0) {
+        LOG_ERR("can't write feed cfg1 %d", ret);
+    }
+
+    return ret;
+}
+
+int pinnacle_apply_runtime_config(const struct device *dev) {
+    const struct pinnacle_config *config = dev->config;
+    struct pinnacle_data *data = dev->data;
+    int ret;
+
+    data->touching = false;
+    data->moved_since_touch = false;
+    data->scroll_active = false;
+    data->drag_active = false;
+    data->scroll_accum = 0;
+    data->last_tap_ms = -1;
+    k_work_cancel_delayable(&data->click_work);
+
+    ret = pinnacle_set_adc_tracking_sensitivity(dev);
+    if (ret < 0) {
+        return ret;
+    }
+
+    ret = pinnacle_tune_edge_sensitivity(dev);
+    if (ret < 0) {
+        return ret;
+    }
+
+    ret = pinnacle_force_recalibrate(dev);
+    if (ret < 0) {
+        return ret;
+    }
+
+    ret = pinnacle_write(dev, PINNACLE_SLEEP_INTERVAL, 255);
+    if (ret < 0) {
+        return ret;
+    }
+
+    ret = pinnacle_apply_feed_config(dev);
+    if (ret < 0) {
+        return ret;
+    }
+
+    return pinnacle_set_sleep(dev, config->sleep_en);
+}
+
 static int pinnacle_init(const struct device *dev) {
     struct pinnacle_data *data = dev->data;
     const struct pinnacle_config *config = dev->config;
@@ -780,7 +863,7 @@ static int pinnacle_pm_action(const struct device *dev, enum pm_device_action ac
 
 #define PINNACLE_INST(n)                                                                           \
     static struct pinnacle_data pinnacle_data_##n;                                                 \
-    static const struct pinnacle_config pinnacle_config_##n = {                                    \
+    static struct pinnacle_config pinnacle_config_##n = {                                          \
         COND_CODE_1(DT_INST_ON_BUS(n, i2c),                                                        \
                     (.bus = {.i2c = I2C_DT_SPEC_INST_GET(n)}, .seq_read = pinnacle_i2c_seq_read,   \
                      .write = pinnacle_i2c_write),                                                 \

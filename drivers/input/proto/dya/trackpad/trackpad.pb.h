@@ -80,6 +80,11 @@ typedef struct _dya_trackpad_ResetDeviceResponse {
     char dummy_field;
 } dya_trackpad_ResetDeviceResponse;
 
+typedef struct _dya_trackpad_SetDeviceRequest {
+    bool has_device;
+    dya_trackpad_TrackpadDevice device;
+} dya_trackpad_SetDeviceRequest;
+
 typedef struct _dya_trackpad_ErrorResponse {
     char message[96];
 } dya_trackpad_ErrorResponse;
@@ -91,6 +96,7 @@ typedef struct _dya_trackpad_Request {
         dya_trackpad_GetDeviceRequest get_device;
         dya_trackpad_SetSleepRequest set_sleep;
         dya_trackpad_ResetDeviceRequest reset_device;
+        dya_trackpad_SetDeviceRequest set_device;
     } request_type;
 } dya_trackpad_Request;
 
@@ -139,6 +145,7 @@ extern "C" {
 #define dya_trackpad_SetSleepResponse_init_default {0}
 #define dya_trackpad_ResetDeviceRequest_init_default {0}
 #define dya_trackpad_ResetDeviceResponse_init_default {0}
+#define dya_trackpad_SetDeviceRequest_init_default {false, dya_trackpad_TrackpadDevice_init_default}
 #define dya_trackpad_ErrorResponse_init_default  {""}
 #define dya_trackpad_Request_init_default        {0, {dya_trackpad_ListDevicesRequest_init_default}}
 #define dya_trackpad_Response_init_default       {0, {dya_trackpad_ErrorResponse_init_default}}
@@ -151,6 +158,7 @@ extern "C" {
 #define dya_trackpad_SetSleepResponse_init_zero  {0}
 #define dya_trackpad_ResetDeviceRequest_init_zero {0}
 #define dya_trackpad_ResetDeviceResponse_init_zero {0}
+#define dya_trackpad_SetDeviceRequest_init_zero  {false, dya_trackpad_TrackpadDevice_init_zero}
 #define dya_trackpad_ErrorResponse_init_zero     {""}
 #define dya_trackpad_Request_init_zero           {0, {dya_trackpad_ListDevicesRequest_init_zero}}
 #define dya_trackpad_Response_init_zero          {0, {dya_trackpad_ErrorResponse_init_zero}}
@@ -187,11 +195,13 @@ extern "C" {
 #define dya_trackpad_SetSleepRequest_id_tag      1
 #define dya_trackpad_SetSleepRequest_enabled_tag 2
 #define dya_trackpad_ResetDeviceRequest_id_tag   1
+#define dya_trackpad_SetDeviceRequest_device_tag 1
 #define dya_trackpad_ErrorResponse_message_tag   1
 #define dya_trackpad_Request_list_devices_tag    1
 #define dya_trackpad_Request_get_device_tag      2
 #define dya_trackpad_Request_set_sleep_tag       3
 #define dya_trackpad_Request_reset_device_tag    4
+#define dya_trackpad_Request_set_device_tag      5
 #define dya_trackpad_Response_error_tag          1
 #define dya_trackpad_Response_list_devices_tag   2
 #define dya_trackpad_Response_get_device_tag     3
@@ -271,6 +281,12 @@ X(a, STATIC,   SINGULAR, UINT32,   id,                1)
 #define dya_trackpad_ResetDeviceResponse_CALLBACK NULL
 #define dya_trackpad_ResetDeviceResponse_DEFAULT NULL
 
+#define dya_trackpad_SetDeviceRequest_FIELDLIST(X, a) \
+X(a, STATIC,   OPTIONAL, MESSAGE,  device,            1)
+#define dya_trackpad_SetDeviceRequest_CALLBACK NULL
+#define dya_trackpad_SetDeviceRequest_DEFAULT NULL
+#define dya_trackpad_SetDeviceRequest_device_MSGTYPE dya_trackpad_TrackpadDevice
+
 #define dya_trackpad_ErrorResponse_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, STRING,   message,           1)
 #define dya_trackpad_ErrorResponse_CALLBACK NULL
@@ -280,13 +296,15 @@ X(a, STATIC,   SINGULAR, STRING,   message,           1)
 X(a, STATIC,   ONEOF,    MESSAGE,  (request_type,list_devices,request_type.list_devices),   1) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (request_type,get_device,request_type.get_device),   2) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (request_type,set_sleep,request_type.set_sleep),   3) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (request_type,reset_device,request_type.reset_device),   4)
+X(a, STATIC,   ONEOF,    MESSAGE,  (request_type,reset_device,request_type.reset_device),   4) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (request_type,set_device,request_type.set_device),   5)
 #define dya_trackpad_Request_CALLBACK NULL
 #define dya_trackpad_Request_DEFAULT NULL
 #define dya_trackpad_Request_request_type_list_devices_MSGTYPE dya_trackpad_ListDevicesRequest
 #define dya_trackpad_Request_request_type_get_device_MSGTYPE dya_trackpad_GetDeviceRequest
 #define dya_trackpad_Request_request_type_set_sleep_MSGTYPE dya_trackpad_SetSleepRequest
 #define dya_trackpad_Request_request_type_reset_device_MSGTYPE dya_trackpad_ResetDeviceRequest
+#define dya_trackpad_Request_request_type_set_device_MSGTYPE dya_trackpad_SetDeviceRequest
 
 #define dya_trackpad_Response_FIELDLIST(X, a) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (response_type,error,response_type.error),   1) \
@@ -311,6 +329,7 @@ extern const pb_msgdesc_t dya_trackpad_SetSleepRequest_msg;
 extern const pb_msgdesc_t dya_trackpad_SetSleepResponse_msg;
 extern const pb_msgdesc_t dya_trackpad_ResetDeviceRequest_msg;
 extern const pb_msgdesc_t dya_trackpad_ResetDeviceResponse_msg;
+extern const pb_msgdesc_t dya_trackpad_SetDeviceRequest_msg;
 extern const pb_msgdesc_t dya_trackpad_ErrorResponse_msg;
 extern const pb_msgdesc_t dya_trackpad_Request_msg;
 extern const pb_msgdesc_t dya_trackpad_Response_msg;
@@ -325,6 +344,7 @@ extern const pb_msgdesc_t dya_trackpad_Response_msg;
 #define dya_trackpad_SetSleepResponse_fields &dya_trackpad_SetSleepResponse_msg
 #define dya_trackpad_ResetDeviceRequest_fields &dya_trackpad_ResetDeviceRequest_msg
 #define dya_trackpad_ResetDeviceResponse_fields &dya_trackpad_ResetDeviceResponse_msg
+#define dya_trackpad_SetDeviceRequest_fields &dya_trackpad_SetDeviceRequest_msg
 #define dya_trackpad_ErrorResponse_fields &dya_trackpad_ErrorResponse_msg
 #define dya_trackpad_Request_fields &dya_trackpad_Request_msg
 #define dya_trackpad_Response_fields &dya_trackpad_Response_msg

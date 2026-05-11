@@ -52,6 +52,8 @@ message SetSleepResponse {}
 message ResetDeviceRequest { uint32 id = 1; }
 message ResetDeviceResponse {}
 
+message SetDeviceRequest { TrackpadDevice device = 1; }
+
 message ErrorResponse { string message = 1; }
 
 message Request {
@@ -60,6 +62,7 @@ message Request {
     GetDeviceRequest get_device = 2;
     SetSleepRequest set_sleep = 3;
     ResetDeviceRequest reset_device = 4;
+    SetDeviceRequest set_device = 5;
   }
 }
 

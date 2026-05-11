@@ -33,6 +33,9 @@ PB_BIND(dya_trackpad_ResetDeviceRequest, dya_trackpad_ResetDeviceRequest, AUTO)
 PB_BIND(dya_trackpad_ResetDeviceResponse, dya_trackpad_ResetDeviceResponse, AUTO)
 
 
+PB_BIND(dya_trackpad_SetDeviceRequest, dya_trackpad_SetDeviceRequest, AUTO)
+
+
 PB_BIND(dya_trackpad_ErrorResponse, dya_trackpad_ErrorResponse, AUTO)
 
 
@@ -40,7 +43,6 @@ PB_BIND(dya_trackpad_Request, dya_trackpad_Request, AUTO)
 
 
 PB_BIND(dya_trackpad_Response, dya_trackpad_Response, AUTO)
-
 
 
 

@@ -8,6 +8,8 @@ import {
 } from "@cormoran/zmk-studio-react-hook";
 import { Request, Response, Sensitivity, type TrackpadDevice } from "./proto/dya/trackpad/trackpad";
 
+type TrackpadRequest = Request & { setDevice?: { device: TrackpadDevice } };
+
 const SUBSYSTEM_CANDIDATES = [
   "dya__trackpad",
   "dya_trackpad",
@@ -60,6 +62,11 @@ function encodeBoolField(fieldNumber: number, value: boolean): number[] {
   return [...encodeVarint(fieldNumber << 3), value ? 1 : 0];
 }
 
+function encodeStringField(fieldNumber: number, value: string): number[] {
+  const bytes = new TextEncoder().encode(value);
+  return [...encodeVarint((fieldNumber << 3) | 2), ...encodeVarint(bytes.length), ...bytes];
+}
+
 function encodeMessageField(fieldNumber: number, payload: number[]): Uint8Array {
   return Uint8Array.from([
     ...encodeVarint((fieldNumber << 3) | 2),
@@ -68,7 +75,51 @@ function encodeMessageField(fieldNumber: number, payload: number[]): Uint8Array 
   ]);
 }
 
-function encodeTrackpadRequest(request: Request): Uint8Array {
+function pushBoolField(out: number[], fieldNumber: number, value: boolean | undefined) {
+  if (value) {
+    out.push(...encodeBoolField(fieldNumber, value));
+  }
+}
+
+function pushUint32Field(out: number[], fieldNumber: number, value: number | undefined) {
+  if (value != null && value !== 0) {
+    out.push(...encodeUint32Field(fieldNumber, value));
+  }
+}
+
+function encodeTrackpadDevice(device: TrackpadDevice): number[] {
+  const out: number[] = [];
+  pushUint32Field(out, 1, device.id);
+  if (device.name) {
+    out.push(...encodeStringField(2, device.name));
+  }
+  pushBoolField(out, 3, device.rotate90);
+  pushBoolField(out, 4, device.xInvert);
+  pushBoolField(out, 5, device.yInvert);
+  pushBoolField(out, 6, device.sleep);
+  pushBoolField(out, 7, device.noTaps);
+  pushBoolField(out, 8, device.noSecondaryTap);
+  pushBoolField(out, 9, device.absoluteGestures);
+  pushBoolField(out, 10, device.tapToClick);
+  pushBoolField(out, 11, device.doubleTapDrag);
+  pushBoolField(out, 12, device.reverseCircularScroll);
+  pushUint32Field(out, 13, device.sensitivity);
+  pushUint32Field(out, 14, device.xAxisZMin);
+  pushUint32Field(out, 15, device.yAxisZMin);
+  pushUint32Field(out, 16, device.touchZThreshold);
+  pushUint32Field(out, 17, device.xMax);
+  pushUint32Field(out, 18, device.yMax);
+  pushUint32Field(out, 19, device.edgeScrollMargin);
+  pushUint32Field(out, 20, device.pointerDivisor);
+  pushUint32Field(out, 21, device.tapTimeoutMs);
+  pushUint32Field(out, 22, device.doubleTapMs);
+  pushUint32Field(out, 23, device.tapMoveThreshold);
+  pushUint32Field(out, 24, device.scrollStep);
+  pushBoolField(out, 25, device.ready);
+  return out;
+}
+
+function encodeTrackpadRequest(request: TrackpadRequest): Uint8Array {
   if (request.listDevices !== undefined) {
     return encodeMessageField(1, []);
   }
@@ -83,6 +134,9 @@ function encodeTrackpadRequest(request: Request): Uint8Array {
   }
   if (request.resetDevice !== undefined) {
     return encodeMessageField(4, encodeUint32Field(1, request.resetDevice.id));
+  }
+  if (request.setDevice !== undefined) {
+    return encodeMessageField(5, Array.from(encodeMessageField(1, encodeTrackpadDevice(request.setDevice.device))));
   }
   throw new Error("Empty trackpad request");
 }
@@ -229,7 +283,7 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
     return null;
   }, [zmkApp, demoMode]);
 
-  const call = async (request: Request) => {
+  const call = async (request: TrackpadRequest) => {
     if (!zmkApp || !subsystem) {
       throw new Error("Trackpad subsystem not available");
     }
@@ -364,6 +418,29 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
     }
   };
 
+  const applySettings = async () => {
+    if (selectedId == null || !draft) {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      if (demoMode) {
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        setDevices((prev) => prev.map((d) => (d.id === selectedId ? { ...draft } : d)));
+      } else {
+        const resp = await call({ setDevice: { device: draft } } as TrackpadRequest);
+        const device = resp.getDevice?.device ?? draft;
+        setDevices((prev) => prev.map((d) => (d.id === selectedId ? device : d)));
+        setDrafts((prev) => ({ ...prev, [selectedId]: device }));
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "RPC failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const selected = devices.find((d) => d.id === selectedId) ?? null;
   const draft = selectedId != null ? drafts[selectedId] ?? selected : null;
   const canUseRpc = demoMode || Boolean(subsystem);
@@ -411,6 +488,9 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
         <button className="btn" disabled={busy || selectedId == null} onClick={() => setSleep(false)}>
           Sleep OFF
         </button>
+        <button className="btn primary" disabled={busy || selectedId == null} onClick={applySettings}>
+          Apply Settings
+        </button>
         <button className="btn danger" disabled={busy || selectedId == null} onClick={reset}>
           Reset
         </button>
@@ -450,7 +530,7 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
       {selected && (
         <>
           <p className="hint">
-            All fields are editable in UI. Firmware RPC apply currently supports <code>sleep/reset</code> only.
+            Edit fields and press <code>Apply Settings</code> to write them to the trackpad.
           </p>
           <div className="grid">
             {BOOL_FIELDS.map((k) => (

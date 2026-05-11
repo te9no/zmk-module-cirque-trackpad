@@ -13,10 +13,19 @@ menuconfig INPUT_PINNACLE
 
 config INPUT_PINNACLE_STUDIO_RPC
     bool "Enable DYA trackpad custom Studio RPC"
-    depends on INPUT_PINNACLE
+    default y if ZMK_STUDIO_RPC
     select NANOPB
+    select ZMK_SPLIT_RELAY_EVENT if ZMK_SPLIT
     help
-      Compatibility option for configs that enable trackpad Studio RPC.
+      Enable the custom Studio RPC subsystem for the Cirque trackpad Web UI.
+      This can be enabled on a central half even when the physical trackpad is
+      on a peripheral half; in that case the subsystem is published, but only
+      locally registered Cirque devices can be listed or controlled.
+
+config INPUT_PINNACLE_STUDIO_RPC_SPLIT_TIMEOUT_MS
+    int "DYA trackpad Studio RPC split request timeout"
+    default 1200
+    depends on INPUT_PINNACLE_STUDIO_RPC && ZMK_SPLIT_RELAY_EVENT
 
 if INPUT_PINNACLE
 

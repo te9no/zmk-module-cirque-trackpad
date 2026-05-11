@@ -8,7 +8,15 @@ import {
 } from "@cormoran/zmk-studio-react-hook";
 import { Request, Response, Sensitivity, type TrackpadDevice } from "./proto/dya/trackpad/trackpad";
 
-const SUBSYSTEM_CANDIDATES = ["dya__trackpad", "dya_trackpad", "zmk__trackpad", "trackpad"];
+const SUBSYSTEM_CANDIDATES = [
+  "dya__trackpad",
+  "dya_trackpad",
+  "zmk__trackpad",
+  "trackpad",
+  "tpd",
+  "dya__tpd",
+  "dya_tpd",
+];
 
 const BOOL_FIELDS: Array<keyof TrackpadDevice> = [
   "rotate90",
@@ -156,6 +164,10 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
   const [drafts, setDrafts] = useState<Record<number, TrackpadDevice>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const connection = zmkApp?.state.connection ?? null;
+  const availableSubsystems = ((connection as any)?.subsystems ?? []) as Array<Record<string, unknown>>;
+  const availableSubsystemIds = availableSubsystems.map(formatSubsystem);
 
   const subsystem = useMemo(() => {
     if (!zmkApp || demoMode) {
@@ -168,7 +180,12 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
       }
     }
     const available = (zmkApp.state.connection as any)?.subsystems ?? [];
-    return available.find((s: any) => String(s?.identifier ?? "").toLowerCase().includes("track")) ?? null;
+    return (
+      available.find((s: any) => {
+        const id = String(s?.identifier ?? "").toLowerCase();
+        return id.includes("track") || id.includes("tpd");
+      }) ?? null
+    );
   }, [zmkApp, demoMode]);
 
   const call = async (request: Request) => {
@@ -194,6 +211,7 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
 
   const hydrate = (nextDevices: TrackpadDevice[]) => {
     setDevices(nextDevices);
+    setHasLoaded(true);
     setDrafts((prev) => {
       const next = { ...prev };
       for (const d of nextDevices) {
@@ -307,6 +325,7 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
 
   const selected = devices.find((d) => d.id === selectedId) ?? null;
   const draft = selectedId != null ? drafts[selectedId] ?? selected : null;
+  const canUseRpc = demoMode || Boolean(subsystem);
 
   const updateDraft = (patch: Partial<TrackpadDevice>) => {
     if (selectedId == null || !draft) {
@@ -319,13 +338,22 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
     <section className="card">
       <div className="section-head">
         <h2>Trackpad Settings</h2>
-        {!demoMode && zmkApp && !subsystem && (
-          <p className="error">Trackpad subsystem not found: {SUBSYSTEM_CANDIDATES.join(", ")}</p>
+        {!demoMode && connection && !subsystem && (
+          <p className="error">
+            Trackpad subsystem not available on current target.
+          </p>
         )}
       </div>
+      {!demoMode && !connection && <p className="hint">Connect Bluetooth/Serial first.</p>}
+      {!demoMode && connection && !subsystem && (
+        <p className="hint">
+          Tried: {SUBSYSTEM_CANDIDATES.join(", ")} | Available:{" "}
+          {availableSubsystemIds.length > 0 ? availableSubsystemIds.join(", ") : "(none)"}
+        </p>
+      )}
 
       <div className="row">
-        <button className="btn primary" disabled={busy} onClick={loadDevices}>
+        <button className="btn primary" disabled={busy || !canUseRpc} onClick={loadDevices}>
           {demoMode ? "Load Demo Devices" : "List Devices"}
         </button>
         <button className="btn" disabled={busy || selectedId == null} onClick={refreshOne}>
@@ -343,6 +371,22 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
       </div>
 
       {error && <p className="error">{error}</p>}
+
+      {!demoMode && connection && !subsystem && (
+        <p className="hint">
+          The connected central does not advertise the trackpad RPC subsystem. Enable
+          <code> CONFIG_INPUT_PINNACLE_STUDIO_RPC=y</code> in the JOY firmware to make this UI
+          discoverable over Bluetooth.
+        </p>
+      )}
+
+      {!demoMode && subsystem && hasLoaded && devices.length === 0 && (
+        <p className="hint">
+          Trackpad RPC is available, but this target reported no local Cirque devices. With JOY as
+          central and TPD as peripheral, the UI can only control TPD if JOY exposes or forwards the
+          TPD settings through its Studio RPC.
+        </p>
+      )}
 
       {devices.length > 0 && (
         <label className="device-select">
@@ -401,6 +445,12 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
       )}
     </section>
   );
+}
+
+function formatSubsystem(subsystem: Record<string, unknown>) {
+  const id = subsystem.identifier ?? subsystem.id ?? subsystem.name ?? "(unknown)";
+  const index = subsystem.index;
+  return index == null ? String(id) : `${String(id)}#${String(index)}`;
 }
 
 function formatDevice(d: TrackpadDevice) {

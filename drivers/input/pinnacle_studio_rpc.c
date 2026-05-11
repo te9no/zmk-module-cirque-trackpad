@@ -11,7 +11,12 @@
 #include <zephyr/sys/iterable_sections.h>
 #include <zephyr/sys/util.h>
 #include <trackpad.pb.h>
+#include <zmk/event_manager.h>
 #include <proto/zmk/custom.pb.h>
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+#include <zmk/split/central.h>
+#endif
 
 #include "input_pinnacle.h"
 
@@ -90,14 +95,21 @@ static struct zmk_rpc_custom_subsystem_meta trackpad_rpc_meta = {
 ZMK_RPC_CUSTOM_SUBSYSTEM(dya__trackpad, &trackpad_rpc_meta, dya_trackpad_rpc_handle_request);
 ZMK_RPC_CUSTOM_SUBSYSTEM_RESPONSE_BUFFER(dya__trackpad, dya_trackpad_Response);
 
+#if IS_ENABLED(CONFIG_INPUT_PINNACLE) && DT_HAS_COMPAT_STATUS_OKAY(cirque_pinnacle)
 #define PINNACLE_DEV_REF(n) DEVICE_DT_GET(DT_DRV_INST(n)),
 static const struct device *const pinnacle_devices[] = {DT_INST_FOREACH_STATUS_OKAY(PINNACLE_DEV_REF)};
+#else
+static const struct device *const pinnacle_devices[] = {NULL};
+#endif
 
 static const struct device *get_device_by_id(uint32_t id) {
     if (id >= ARRAY_SIZE(pinnacle_devices)) {
         return NULL;
     }
     const struct device *dev = pinnacle_devices[id];
+    if (dev == NULL) {
+        return NULL;
+    }
     if (!device_is_ready(dev)) {
         return NULL;
     }
@@ -106,6 +118,56 @@ static const struct device *get_device_by_id(uint32_t id) {
 
 static dya_trackpad_TrackpadDevice list_devices_buf[8];
 static size_t list_devices_count;
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+
+enum trackpad_split_request_type {
+    TRACKPAD_SPLIT_REQUEST_LIST = 1,
+    TRACKPAD_SPLIT_REQUEST_GET = 2,
+    TRACKPAD_SPLIT_REQUEST_SET_SLEEP = 3,
+    TRACKPAD_SPLIT_REQUEST_RESET = 4,
+};
+
+struct trackpad_split_request {
+    uint8_t source;
+    uint8_t seq;
+    uint8_t type;
+    uint8_t id;
+    bool enabled;
+} __packed;
+
+#define TRACKPAD_SPLIT_RESPONSE_DATA_SIZE 9
+#define TRACKPAD_SPLIT_RESPONSE_CHUNK_DONE 0x80
+
+struct trackpad_split_response {
+    uint8_t source;
+    uint8_t seq;
+    int8_t status;
+    uint8_t chunk;
+    uint8_t total_len;
+    uint8_t data[TRACKPAD_SPLIT_RESPONSE_DATA_SIZE];
+} __packed;
+
+ZMK_EVENT_DECLARE(trackpad_split_request);
+ZMK_EVENT_DECLARE(trackpad_split_response);
+ZMK_EVENT_IMPL(trackpad_split_request);
+ZMK_EVENT_IMPL(trackpad_split_response);
+
+ZMK_RELAY_EVENT_CENTRAL_TO_PERIPHERAL(trackpad_split_request, tq, source);
+ZMK_RELAY_EVENT_HANDLE(trackpad_split_request, tq, source);
+ZMK_RELAY_EVENT_PERIPHERAL_TO_CENTRAL(trackpad_split_response, ts, source);
+ZMK_RELAY_EVENT_HANDLE(trackpad_split_response, ts, source);
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+K_SEM_DEFINE(split_response_sem, 0, 1);
+static int split_response_status;
+static uint8_t split_response_buf[sizeof(dya_trackpad_TrackpadDevice)];
+static uint8_t split_response_len;
+static uint8_t split_response_source;
+static uint8_t split_request_seq;
+#endif
+
+#endif
 
 static bool encode_list_devices(pb_ostream_t *stream, const pb_field_t *field, void *const *arg) {
     ARG_UNUSED(arg);
@@ -166,61 +228,32 @@ static void fill_device_info(const struct device *dev, uint32_t id, dya_trackpad
     out->ready = device_is_ready(dev);
 }
 
-static int handle_list_devices(dya_trackpad_Response *resp) {
-    dya_trackpad_ListDevicesResponse result = dya_trackpad_ListDevicesResponse_init_zero;
-    list_devices_count = 0;
-
-    for (size_t i = 0; i < ARRAY_SIZE(list_devices_buf); i++) {
-        if (i >= ARRAY_SIZE(pinnacle_devices)) {
-            break;
+static int fill_first_local_device(dya_trackpad_TrackpadDevice *out) {
+    for (size_t i = 0; i < ARRAY_SIZE(pinnacle_devices); i++) {
+        const struct device *dev = pinnacle_devices[i];
+        if (dev == NULL || !device_is_ready(dev)) {
+            continue;
         }
-        fill_device_info(pinnacle_devices[i], (uint32_t)i, &list_devices_buf[i]);
-        list_devices_count++;
+        fill_device_info(dev, (uint32_t)i, out);
+        return 0;
     }
-    result.devices.funcs.encode = encode_list_devices;
-    result.devices.arg = NULL;
 
-    resp->which_response_type = dya_trackpad_Response_list_devices_tag;
-    resp->response_type.list_devices = result;
-    return 0;
+    return -ENOENT;
 }
 
-static int handle_get_device(const dya_trackpad_GetDeviceRequest *req, dya_trackpad_Response *resp) {
-    const struct device *dev = get_device_by_id(req->id);
+static int fill_local_device_by_id(uint32_t id, dya_trackpad_TrackpadDevice *out) {
+    const struct device *dev = get_device_by_id(id);
     if (dev == NULL) {
-        set_error(resp, "Device not found");
         return -ENOENT;
     }
 
-    dya_trackpad_GetDeviceResponse result = dya_trackpad_GetDeviceResponse_init_zero;
-    fill_device_info(dev, req->id, &result.device);
-    resp->which_response_type = dya_trackpad_Response_get_device_tag;
-    resp->response_type.get_device = result;
+    fill_device_info(dev, id, out);
     return 0;
 }
 
-static int handle_set_sleep(const dya_trackpad_SetSleepRequest *req, dya_trackpad_Response *resp) {
-    const struct device *dev = get_device_by_id(req->id);
+static int reset_local_device_by_id(uint32_t id) {
+    const struct device *dev = get_device_by_id(id);
     if (dev == NULL) {
-        set_error(resp, "Device not found");
-        return -ENOENT;
-    }
-
-    int rc = pinnacle_set_sleep(dev, req->enabled);
-    if (rc != 0) {
-        return rc;
-    }
-
-    resp->which_response_type = dya_trackpad_Response_set_sleep_tag;
-    resp->response_type.set_sleep =
-        (dya_trackpad_SetSleepResponse)dya_trackpad_SetSleepResponse_init_zero;
-    return 0;
-}
-
-static int handle_reset_device(const dya_trackpad_ResetDeviceRequest *req, dya_trackpad_Response *resp) {
-    const struct device *dev = get_device_by_id(req->id);
-    if (dev == NULL) {
-        set_error(resp, "Device not found");
         return -ENOENT;
     }
 
@@ -235,6 +268,281 @@ static int handle_reset_device(const dya_trackpad_ResetDeviceRequest *req, dya_t
         return rc;
     }
     k_msleep(20);
+    return 0;
+}
+
+static int set_local_sleep_by_id(uint32_t id, bool enabled) {
+    const struct device *dev = get_device_by_id(id);
+    if (dev == NULL) {
+        return -ENOENT;
+    }
+
+#if IS_ENABLED(CONFIG_INPUT_PINNACLE)
+    return pinnacle_set_sleep(dev, enabled);
+#else
+    return -ENODEV;
+#endif
+}
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+
+static void raise_split_response_chunks(uint8_t seq, int status,
+                                        const dya_trackpad_TrackpadDevice *device) {
+    const uint8_t *bytes = (const uint8_t *)device;
+    const uint8_t total_len = (status == 0 && device != NULL) ? sizeof(*device) : 0;
+    const uint8_t chunk_count =
+        total_len == 0 ? 1 : DIV_ROUND_UP(total_len, TRACKPAD_SPLIT_RESPONSE_DATA_SIZE);
+
+    for (uint8_t i = 0; i < chunk_count; i++) {
+        const uint8_t offset = i * TRACKPAD_SPLIT_RESPONSE_DATA_SIZE;
+        const uint8_t remaining = total_len > offset ? total_len - offset : 0;
+        const uint8_t data_len = MIN(remaining, TRACKPAD_SPLIT_RESPONSE_DATA_SIZE);
+        struct trackpad_split_response resp = {
+            .source = ZMK_RELAY_EVENT_SOURCE_SELF,
+            .seq = seq,
+            .status = status < INT8_MIN ? INT8_MIN : (status > INT8_MAX ? INT8_MAX : status),
+            .chunk = i,
+            .total_len = total_len,
+        };
+
+        if (i == chunk_count - 1) {
+            resp.chunk |= TRACKPAD_SPLIT_RESPONSE_CHUNK_DONE;
+        }
+        if (data_len > 0) {
+            memcpy(resp.data, bytes + offset, data_len);
+        }
+
+        raise_trackpad_split_response(resp);
+        k_msleep(2);
+    }
+}
+
+static int handle_split_request_event(const zmk_event_t *eh) {
+    struct trackpad_split_request *req = as_trackpad_split_request(eh);
+    if (req == NULL || req->source == ZMK_RELAY_EVENT_SOURCE_SELF) {
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+
+    dya_trackpad_TrackpadDevice device = dya_trackpad_TrackpadDevice_init_zero;
+    int status = 0;
+
+    switch (req->type) {
+    case TRACKPAD_SPLIT_REQUEST_LIST:
+        status = fill_first_local_device(&device);
+        break;
+    case TRACKPAD_SPLIT_REQUEST_GET:
+        status = fill_local_device_by_id(req->id, &device);
+        break;
+    case TRACKPAD_SPLIT_REQUEST_SET_SLEEP:
+        status = set_local_sleep_by_id(req->id, req->enabled);
+        if (status == 0) {
+            status = fill_local_device_by_id(req->id, &device);
+        }
+        break;
+    case TRACKPAD_SPLIT_REQUEST_RESET:
+        status = reset_local_device_by_id(req->id);
+        if (status == 0) {
+            status = fill_local_device_by_id(req->id, &device);
+        }
+        break;
+    default:
+        status = -ENOTSUP;
+        break;
+    }
+
+    raise_split_response_chunks(req->seq, status, status == 0 ? &device : NULL);
+    return ZMK_EV_EVENT_HANDLED;
+}
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+static int handle_split_response_event(const zmk_event_t *eh) {
+    struct trackpad_split_response *resp = as_trackpad_split_response(eh);
+    if (resp == NULL || resp->source == ZMK_RELAY_EVENT_SOURCE_SELF) {
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+
+    if (resp->seq != split_request_seq) {
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+
+    const uint8_t chunk = resp->chunk & ~TRACKPAD_SPLIT_RESPONSE_CHUNK_DONE;
+    if (chunk == 0) {
+        split_response_source = resp->source;
+    } else if (resp->source != split_response_source) {
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+
+    const uint8_t offset = chunk * TRACKPAD_SPLIT_RESPONSE_DATA_SIZE;
+    if (resp->total_len > sizeof(split_response_buf) || offset > sizeof(split_response_buf)) {
+        split_response_status = -EOVERFLOW;
+        k_sem_give(&split_response_sem);
+        return ZMK_EV_EVENT_HANDLED;
+    }
+
+    const uint8_t remaining = resp->total_len > offset ? resp->total_len - offset : 0;
+    const uint8_t data_len = MIN(remaining, TRACKPAD_SPLIT_RESPONSE_DATA_SIZE);
+    if (data_len > 0) {
+        memcpy(split_response_buf + offset, resp->data, data_len);
+    }
+
+    split_response_status = resp->status;
+    split_response_len = resp->total_len;
+
+    if ((resp->chunk & TRACKPAD_SPLIT_RESPONSE_CHUNK_DONE) != 0) {
+        k_sem_give(&split_response_sem);
+    }
+    return ZMK_EV_EVENT_HANDLED;
+}
+
+static int call_split_trackpad(uint8_t type, uint8_t id, bool enabled,
+                               dya_trackpad_TrackpadDevice *out) {
+    split_request_seq++;
+    if (split_request_seq == 0) {
+        split_request_seq = 1;
+    }
+
+    while (k_sem_take(&split_response_sem, K_NO_WAIT) == 0) {
+    }
+    memset(split_response_buf, 0, sizeof(split_response_buf));
+    split_response_len = 0;
+    split_response_status = 0;
+    split_response_source = 0;
+
+    struct trackpad_split_request req = {
+        .source = ZMK_RELAY_EVENT_SOURCE_SELF,
+        .seq = split_request_seq,
+        .type = type,
+        .id = id,
+        .enabled = enabled,
+    };
+
+    int rc = raise_trackpad_split_request(req);
+    if (rc != 0) {
+        return rc;
+    }
+
+    rc = k_sem_take(&split_response_sem,
+                    K_MSEC(CONFIG_INPUT_PINNACLE_STUDIO_RPC_SPLIT_TIMEOUT_MS));
+    if (rc != 0) {
+        return -ETIMEDOUT;
+    }
+
+    if (split_response_status != 0) {
+        return split_response_status;
+    }
+    if (split_response_len != sizeof(*out)) {
+        return -EIO;
+    }
+
+    memcpy(out, split_response_buf, sizeof(*out));
+    return 0;
+}
+#endif
+
+ZMK_LISTENER(trackpad_split_request_handler, handle_split_request_event);
+ZMK_SUBSCRIPTION(trackpad_split_request_handler, trackpad_split_request);
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+ZMK_LISTENER(trackpad_split_response_handler, handle_split_response_event);
+ZMK_SUBSCRIPTION(trackpad_split_response_handler, trackpad_split_response);
+#endif
+
+#endif
+
+static int handle_list_devices(dya_trackpad_Response *resp) {
+    dya_trackpad_ListDevicesResponse result = dya_trackpad_ListDevicesResponse_init_zero;
+    list_devices_count = 0;
+
+    for (size_t i = 0; i < ARRAY_SIZE(list_devices_buf); i++) {
+        if (i >= ARRAY_SIZE(pinnacle_devices)) {
+            break;
+        }
+        const struct device *dev = pinnacle_devices[i];
+        if (dev == NULL || !device_is_ready(dev)) {
+            continue;
+        }
+        fill_device_info(dev, (uint32_t)i, &list_devices_buf[list_devices_count]);
+        list_devices_count++;
+    }
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    if (list_devices_count == 0) {
+        dya_trackpad_TrackpadDevice split_device = dya_trackpad_TrackpadDevice_init_zero;
+        int rc = call_split_trackpad(TRACKPAD_SPLIT_REQUEST_LIST, 0, false, &split_device);
+        if (rc == 0) {
+            list_devices_buf[0] = split_device;
+            list_devices_buf[0].id = 0;
+            list_devices_count = 1;
+        } else if (rc != -ENOENT) {
+            return rc;
+        }
+    }
+#endif
+
+    result.devices.funcs.encode = encode_list_devices;
+    result.devices.arg = NULL;
+
+    resp->which_response_type = dya_trackpad_Response_list_devices_tag;
+    resp->response_type.list_devices = result;
+    return 0;
+}
+
+static int handle_get_device(const dya_trackpad_GetDeviceRequest *req, dya_trackpad_Response *resp) {
+    dya_trackpad_GetDeviceResponse result = dya_trackpad_GetDeviceResponse_init_zero;
+    int rc = fill_local_device_by_id(req->id, &result.device);
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    if (rc == -ENOENT) {
+        rc = call_split_trackpad(TRACKPAD_SPLIT_REQUEST_GET, (uint8_t)req->id, false,
+                                 &result.device);
+    }
+#endif
+
+    if (rc != 0) {
+        set_error(resp, "Device not found");
+        return rc;
+    }
+
+    resp->which_response_type = dya_trackpad_Response_get_device_tag;
+    resp->response_type.get_device = result;
+    return 0;
+}
+
+static int handle_set_sleep(const dya_trackpad_SetSleepRequest *req, dya_trackpad_Response *resp) {
+    int rc = set_local_sleep_by_id(req->id, req->enabled);
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    if (rc == -ENOENT) {
+        dya_trackpad_TrackpadDevice split_device;
+        rc = call_split_trackpad(TRACKPAD_SPLIT_REQUEST_SET_SLEEP, (uint8_t)req->id, req->enabled,
+                                 &split_device);
+    }
+#endif
+
+    if (rc != 0) {
+        return rc;
+    }
+
+    resp->which_response_type = dya_trackpad_Response_set_sleep_tag;
+    resp->response_type.set_sleep =
+        (dya_trackpad_SetSleepResponse)dya_trackpad_SetSleepResponse_init_zero;
+    return 0;
+}
+
+static int handle_reset_device(const dya_trackpad_ResetDeviceRequest *req, dya_trackpad_Response *resp) {
+    int rc = reset_local_device_by_id(req->id);
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    if (rc == -ENOENT) {
+        dya_trackpad_TrackpadDevice split_device;
+        rc = call_split_trackpad(TRACKPAD_SPLIT_REQUEST_RESET, (uint8_t)req->id, false,
+                                 &split_device);
+    }
+#endif
+
+    if (rc != 0) {
+        return rc;
+    }
 
     resp->which_response_type = dya_trackpad_Response_reset_device_tag;
     resp->response_type.reset_device =

@@ -131,6 +131,7 @@ enum trackpad_split_request_type {
 };
 
 #define TRACKPAD_SPLIT_REQUEST_DATA_SIZE 8
+#define TRACKPAD_SPLIT_REQUEST_CHUNK_DELAY_MS 12
 #define TRACKPAD_SPLIT_REQUEST_CHUNK_DONE 0x80
 
 struct trackpad_split_request {
@@ -155,6 +156,35 @@ struct trackpad_split_response {
     uint8_t data[TRACKPAD_SPLIT_RESPONSE_DATA_SIZE];
 } __packed;
 
+struct trackpad_split_device_config {
+    bool rotate_90;
+    bool x_invert;
+    bool y_invert;
+    bool sleep_en;
+    bool no_taps;
+    bool no_secondary_tap;
+    bool absolute_gestures;
+    bool tap_to_click;
+    bool double_tap_drag;
+    bool reverse_circular_scroll;
+    bool inertia_enabled;
+    uint8_t sensitivity;
+    uint8_t x_axis_z_min;
+    uint8_t y_axis_z_min;
+    uint8_t touch_z_threshold;
+    uint16_t x_max;
+    uint16_t y_max;
+    uint16_t edge_scroll_margin;
+    uint16_t pointer_divisor;
+    uint16_t tap_timeout_ms;
+    uint16_t double_tap_ms;
+    uint16_t tap_move_threshold;
+    uint16_t scroll_step;
+    uint16_t inertia_decay;
+    uint16_t inertia_min_velocity;
+    uint16_t inertia_max_ticks;
+} __packed;
+
 ZMK_EVENT_DECLARE(trackpad_split_request);
 ZMK_EVENT_DECLARE(trackpad_split_response);
 ZMK_EVENT_IMPL(trackpad_split_request);
@@ -174,7 +204,7 @@ static uint8_t split_response_source;
 static uint8_t split_request_seq;
 #endif
 
-static uint8_t split_request_buf[sizeof(dya_trackpad_TrackpadDevice)];
+static uint8_t split_request_buf[sizeof(struct trackpad_split_device_config)];
 static uint8_t split_request_len;
 static uint8_t split_request_seq_active;
 static uint8_t split_request_source;
@@ -266,6 +296,76 @@ static int fill_local_device_by_id(uint32_t id, dya_trackpad_TrackpadDevice *out
     fill_device_info(dev, id, out);
     return 0;
 }
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_RELAY_EVENT)
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+static void split_config_from_device(const dya_trackpad_TrackpadDevice *device,
+                                     struct trackpad_split_device_config *cfg) {
+    *cfg = (struct trackpad_split_device_config){
+        .rotate_90 = device->rotate90,
+        .x_invert = device->xInvert,
+        .y_invert = device->yInvert,
+        .sleep_en = device->sleep,
+        .no_taps = device->noTaps,
+        .no_secondary_tap = device->noSecondaryTap,
+        .absolute_gestures = device->absoluteGestures,
+        .tap_to_click = device->tapToClick,
+        .double_tap_drag = device->doubleTapDrag,
+        .reverse_circular_scroll = device->reverseCircularScroll,
+        .inertia_enabled = device->inertiaEnabled,
+        .sensitivity = (uint8_t)device->sensitivity,
+        .x_axis_z_min = MIN(device->xAxisZMin, UINT8_MAX),
+        .y_axis_z_min = MIN(device->yAxisZMin, UINT8_MAX),
+        .touch_z_threshold = MIN(device->touchZThreshold, UINT8_MAX),
+        .x_max = MAX(1U, MIN(device->xMax, UINT16_MAX)),
+        .y_max = MAX(1U, MIN(device->yMax, UINT16_MAX)),
+        .edge_scroll_margin = MIN(device->edgeScrollMargin, UINT16_MAX),
+        .pointer_divisor = MAX(1U, MIN(device->pointerDivisor, UINT16_MAX)),
+        .tap_timeout_ms = MIN(device->tapTimeoutMs, UINT16_MAX),
+        .double_tap_ms = MIN(device->doubleTapMs, UINT16_MAX),
+        .tap_move_threshold = MIN(device->tapMoveThreshold, UINT16_MAX),
+        .scroll_step = MAX(1U, MIN(device->scrollStep, UINT16_MAX)),
+        .inertia_decay = CLAMP(device->inertiaDecay, 1U, 999U),
+        .inertia_min_velocity = MAX(1U, MIN(device->inertiaMinVelocity, UINT16_MAX)),
+        .inertia_max_ticks = MAX(1U, MIN(device->inertiaMaxTicks, UINT16_MAX)),
+    };
+}
+#endif
+
+static void device_from_split_config(uint32_t id, const struct trackpad_split_device_config *cfg,
+                                     dya_trackpad_TrackpadDevice *device) {
+    *device = (dya_trackpad_TrackpadDevice)dya_trackpad_TrackpadDevice_init_zero;
+    device->id = id;
+    device->rotate90 = cfg->rotate_90;
+    device->xInvert = cfg->x_invert;
+    device->yInvert = cfg->y_invert;
+    device->sleep = cfg->sleep_en;
+    device->noTaps = cfg->no_taps;
+    device->noSecondaryTap = cfg->no_secondary_tap;
+    device->absoluteGestures = cfg->absolute_gestures;
+    device->tapToClick = cfg->tap_to_click;
+    device->doubleTapDrag = cfg->double_tap_drag;
+    device->reverseCircularScroll = cfg->reverse_circular_scroll;
+    device->inertiaEnabled = cfg->inertia_enabled;
+    device->sensitivity = (dya_trackpad_Sensitivity)cfg->sensitivity;
+    device->xAxisZMin = cfg->x_axis_z_min;
+    device->yAxisZMin = cfg->y_axis_z_min;
+    device->touchZThreshold = cfg->touch_z_threshold;
+    device->xMax = cfg->x_max;
+    device->yMax = cfg->y_max;
+    device->edgeScrollMargin = cfg->edge_scroll_margin;
+    device->pointerDivisor = cfg->pointer_divisor;
+    device->tapTimeoutMs = cfg->tap_timeout_ms;
+    device->doubleTapMs = cfg->double_tap_ms;
+    device->tapMoveThreshold = cfg->tap_move_threshold;
+    device->scrollStep = cfg->scroll_step;
+    device->inertiaDecay = cfg->inertia_decay;
+    device->inertiaMinVelocity = cfg->inertia_min_velocity;
+    device->inertiaMaxTicks = cfg->inertia_max_ticks;
+}
+
+#endif
 
 static int reset_local_device_by_id(uint32_t id) {
     const struct device *dev = get_device_by_id(id);
@@ -663,7 +763,8 @@ static int handle_split_request_event(const zmk_event_t *eh) {
         }
 
         const uint8_t offset = chunk * TRACKPAD_SPLIT_REQUEST_DATA_SIZE;
-        if (req->total_len != split_request_len || req->total_len != sizeof(device) ||
+        if (req->total_len != split_request_len ||
+            req->total_len != sizeof(struct trackpad_split_device_config) ||
             offset > sizeof(split_request_buf)) {
             status = -EOVERFLOW;
             break;
@@ -679,7 +780,9 @@ static int handle_split_request_event(const zmk_event_t *eh) {
             return ZMK_EV_EVENT_HANDLED;
         }
 
-        memcpy(&device, split_request_buf, sizeof(device));
+        struct trackpad_split_device_config config;
+        memcpy(&config, split_request_buf, sizeof(config));
+        device_from_split_config(req->id, &config, &device);
         status = apply_local_device_by_id(&device);
         raise_split_response_chunks(req->seq, status, NULL);
         return ZMK_EV_EVENT_HANDLED;
@@ -749,8 +852,16 @@ static int call_split_trackpad(uint8_t type, uint8_t id, bool enabled,
     split_response_source = 0;
 
     if (device != NULL) {
+        struct trackpad_split_device_config config;
         const uint8_t *bytes = (const uint8_t *)device;
-        const uint8_t total_len = sizeof(*device);
+        uint8_t total_len = sizeof(*device);
+
+        if (type == TRACKPAD_SPLIT_REQUEST_SET_DEVICE) {
+            split_config_from_device(device, &config);
+            bytes = (const uint8_t *)&config;
+            total_len = sizeof(config);
+        }
+
         const uint8_t chunk_count = DIV_ROUND_UP(total_len, TRACKPAD_SPLIT_REQUEST_DATA_SIZE);
 
         for (uint8_t i = 0; i < chunk_count; i++) {
@@ -774,7 +885,7 @@ static int call_split_trackpad(uint8_t type, uint8_t id, bool enabled,
             if (rc != 0) {
                 return rc;
             }
-            k_msleep(2);
+            k_msleep(TRACKPAD_SPLIT_REQUEST_CHUNK_DELAY_MS);
         }
     } else {
         struct trackpad_split_request req = {

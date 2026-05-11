@@ -24,7 +24,7 @@ config INPUT_PINNACLE_STUDIO_RPC
 
 config INPUT_PINNACLE_STUDIO_RPC_SPLIT_TIMEOUT_MS
     int "DYA trackpad Studio RPC split request timeout"
-    default 1200
+    default 5000
     depends on INPUT_PINNACLE_STUDIO_RPC && ZMK_SPLIT_RELAY_EVENT
 
 if INPUT_PINNACLE

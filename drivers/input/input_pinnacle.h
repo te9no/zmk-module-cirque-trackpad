@@ -125,4 +125,4 @@ struct pinnacle_config {
 };
 
 int pinnacle_set_sleep(const struct device *dev, bool enabled);
-int pinnacle_apply_runtime_config(const struct device *dev);
+int pinnacle_apply_runtime_config(const struct device *dev, bool hardware_tuning);

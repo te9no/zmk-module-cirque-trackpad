@@ -303,6 +303,10 @@ static int apply_local_device_by_id(const dya_trackpad_TrackpadDevice *device) {
 
 #if IS_ENABLED(CONFIG_INPUT_PINNACLE)
     struct pinnacle_config *cfg = (struct pinnacle_config *)dev->config;
+    const bool hardware_tuning =
+        cfg->sensitivity != (enum pinnacle_sensitivity)device->sensitivity ||
+        cfg->x_axis_z_min != MIN(device->xAxisZMin, UINT8_MAX) ||
+        cfg->y_axis_z_min != MIN(device->yAxisZMin, UINT8_MAX);
 
     cfg->rotate_90 = device->rotate90;
     cfg->x_invert = device->xInvert;
@@ -328,7 +332,7 @@ static int apply_local_device_by_id(const dya_trackpad_TrackpadDevice *device) {
     cfg->tap_move_threshold = MIN(device->tapMoveThreshold, UINT16_MAX);
     cfg->scroll_step = MAX(1U, MIN(device->scrollStep, UINT16_MAX));
 
-    return pinnacle_apply_runtime_config(dev);
+    return pinnacle_apply_runtime_config(dev, hardware_tuning);
 #else
     return -ENODEV;
 #endif

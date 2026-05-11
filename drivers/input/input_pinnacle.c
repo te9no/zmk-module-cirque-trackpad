@@ -140,95 +140,121 @@ static int pinnacle_clear_status(const struct device *dev) {
 }
 
 static int pinnacle_era_read(const struct device *dev, const uint16_t addr, uint8_t *val) {
-    int ret;
+    int ret = 0;
 
     set_int(dev, false);
 
     ret = pinnacle_write(dev, PINNACLE_REG_ERA_HIGH_BYTE, (uint8_t)(addr >> 8));
     if (ret < 0) {
         LOG_ERR("Failed to write ERA high byte (%d)", ret);
-        return -EIO;
+        ret = -EIO;
+        goto done;
     }
 
     ret = pinnacle_write(dev, PINNACLE_REG_ERA_LOW_BYTE, (uint8_t)(addr & 0x00FF));
     if (ret < 0) {
         LOG_ERR("Failed to write ERA low byte (%d)", ret);
-        return -EIO;
+        ret = -EIO;
+        goto done;
     }
 
     ret = pinnacle_write(dev, PINNACLE_REG_ERA_CONTROL, PINNACLE_ERA_CONTROL_READ);
     if (ret < 0) {
         LOG_ERR("Failed to write ERA control (%d)", ret);
-        return -EIO;
+        ret = -EIO;
+        goto done;
     }
 
     uint8_t control_val;
-    do {
-
+    for (int i = 0; i < 100; i++) {
         ret = pinnacle_seq_read(dev, PINNACLE_REG_ERA_CONTROL, &control_val, 1);
         if (ret < 0) {
             LOG_ERR("Failed to read ERA control (%d)", ret);
-            return -EIO;
+            ret = -EIO;
+            goto done;
         }
+        if (control_val == 0x00) {
+            goto read_value;
+        }
+        k_msleep(1);
+    }
 
-    } while (control_val != 0x00);
+    LOG_WRN("ERA read timeout");
+    ret = -ETIMEDOUT;
+    goto done;
 
+read_value:
     ret = pinnacle_seq_read(dev, PINNACLE_REG_ERA_VALUE, val, 1);
 
     if (ret < 0) {
         LOG_ERR("Failed to read ERA value (%d)", ret);
-        return -EIO;
+        ret = -EIO;
+        goto done;
     }
 
     ret = pinnacle_clear_status(dev);
 
+done:
     set_int(dev, true);
 
     return ret;
 }
 
 static int pinnacle_era_write(const struct device *dev, const uint16_t addr, uint8_t val) {
-    int ret;
+    int ret = 0;
 
     set_int(dev, false);
 
     ret = pinnacle_write(dev, PINNACLE_REG_ERA_VALUE, val);
     if (ret < 0) {
         LOG_ERR("Failed to write ERA value (%d)", ret);
-        return -EIO;
+        ret = -EIO;
+        goto done;
     }
 
     ret = pinnacle_write(dev, PINNACLE_REG_ERA_HIGH_BYTE, (uint8_t)(addr >> 8));
     if (ret < 0) {
         LOG_ERR("Failed to write ERA high byte (%d)", ret);
-        return -EIO;
+        ret = -EIO;
+        goto done;
     }
 
     ret = pinnacle_write(dev, PINNACLE_REG_ERA_LOW_BYTE, (uint8_t)(addr & 0x00FF));
     if (ret < 0) {
         LOG_ERR("Failed to write ERA low byte (%d)", ret);
-        return -EIO;
+        ret = -EIO;
+        goto done;
     }
 
     ret = pinnacle_write(dev, PINNACLE_REG_ERA_CONTROL, PINNACLE_ERA_CONTROL_WRITE);
     if (ret < 0) {
         LOG_ERR("Failed to write ERA control (%d)", ret);
-        return -EIO;
+        ret = -EIO;
+        goto done;
     }
 
     uint8_t control_val;
-    do {
-
+    for (int i = 0; i < 100; i++) {
         ret = pinnacle_seq_read(dev, PINNACLE_REG_ERA_CONTROL, &control_val, 1);
         if (ret < 0) {
             LOG_ERR("Failed to read ERA control (%d)", ret);
-            return -EIO;
+            ret = -EIO;
+            goto done;
         }
+        if (control_val == 0x00) {
+            goto clear_status;
+        }
+        k_msleep(1);
+    }
 
-    } while (control_val != 0x00);
+    LOG_WRN("ERA write timeout");
+    ret = -ETIMEDOUT;
+    goto done;
 
+clear_status:
     ret = pinnacle_clear_status(dev);
 
+done:
     set_int(dev, true);
 
     return ret;
@@ -680,7 +706,7 @@ static int pinnacle_apply_feed_config(const struct device *dev) {
     return ret;
 }
 
-int pinnacle_apply_runtime_config(const struct device *dev) {
+int pinnacle_apply_runtime_config(const struct device *dev, bool hardware_tuning) {
     const struct pinnacle_config *config = dev->config;
     struct pinnacle_data *data = dev->data;
     int ret;
@@ -691,21 +717,20 @@ int pinnacle_apply_runtime_config(const struct device *dev) {
     data->drag_active = false;
     data->scroll_accum = 0;
     data->last_tap_ms = -1;
+    pinnacle_release_drag(dev);
+    k_work_cancel(&data->work);
     k_work_cancel_delayable(&data->click_work);
 
-    ret = pinnacle_set_adc_tracking_sensitivity(dev);
-    if (ret < 0) {
-        return ret;
-    }
+    if (hardware_tuning) {
+        ret = pinnacle_set_adc_tracking_sensitivity(dev);
+        if (ret < 0) {
+            return ret;
+        }
 
-    ret = pinnacle_tune_edge_sensitivity(dev);
-    if (ret < 0) {
-        return ret;
-    }
-
-    ret = pinnacle_force_recalibrate(dev);
-    if (ret < 0) {
-        return ret;
+        ret = pinnacle_tune_edge_sensitivity(dev);
+        if (ret < 0) {
+            return ret;
+        }
     }
 
     ret = pinnacle_write(dev, PINNACLE_SLEEP_INTERVAL, 255);

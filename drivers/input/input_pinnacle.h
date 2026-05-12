@@ -86,6 +86,8 @@ struct pinnacle_data {
     bool inertia_active;
     uint16_t last_x;
     uint16_t last_y;
+    uint16_t touch_start_x;
+    uint16_t touch_start_y;
     int32_t last_dx;
     int32_t last_dy;
     int32_t inertia_vx;

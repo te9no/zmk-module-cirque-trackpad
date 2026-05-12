@@ -62,15 +62,15 @@ properties:
     description: Divisor applied to absolute coordinate deltas when emitting relative pointer movement.
   tap-timeout-ms:
     type: int
-    default: 180
+    default: 250
     description: Maximum touch duration that can become a tap.
   double-tap-ms:
     type: int
-    default: 350
+    default: 240
     description: Maximum interval between taps for double-tap drag.
   tap-move-threshold:
     type: int
-    default: 80
+    default: 140
     description: Maximum raw movement during a touch that can still be considered a tap.
   scroll-step:
     type: int

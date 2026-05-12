@@ -507,14 +507,18 @@ static void pinnacle_report_abs_gestures(const struct device *dev) {
         data->scroll_pos = pinnacle_edge_scroll_position(dev, sample.x, sample.y);
         data->last_x = sample.x;
         data->last_y = sample.y;
+        data->touch_start_x = sample.x;
+        data->touch_start_y = sample.y;
         data->touch_start_ms = now_ms;
         return;
     }
 
     const int32_t dx = (int32_t)sample.x - data->last_x;
     const int32_t dy = (int32_t)sample.y - data->last_y;
+    const int32_t touch_dx = (int32_t)sample.x - data->touch_start_x;
+    const int32_t touch_dy = (int32_t)sample.y - data->touch_start_y;
 
-    if (ABS(dx) > config->tap_move_threshold || ABS(dy) > config->tap_move_threshold) {
+    if (ABS(touch_dx) > config->tap_move_threshold || ABS(touch_dy) > config->tap_move_threshold) {
         data->moved_since_touch = true;
     }
 
@@ -836,6 +840,8 @@ int pinnacle_apply_runtime_config(const struct device *dev, bool hardware_tuning
     data->drag_active = false;
     data->inertia_active = false;
     data->scroll_accum = 0;
+    data->touch_start_x = 0;
+    data->touch_start_y = 0;
     data->last_dx = 0;
     data->last_dy = 0;
     data->inertia_vx = 0;
@@ -915,6 +921,8 @@ static int pinnacle_init(const struct device *dev) {
     data->drag_active = false;
     data->inertia_active = false;
     data->scroll_accum = 0;
+    data->touch_start_x = 0;
+    data->touch_start_y = 0;
     data->last_dx = 0;
     data->last_dy = 0;
     data->inertia_vx = 0;
@@ -1061,9 +1069,9 @@ static int pinnacle_pm_action(const struct device *dev, enum pm_device_action ac
         .y_max = DT_INST_PROP_OR(n, y_max, 2047),                                                  \
         .edge_scroll_margin = DT_INST_PROP_OR(n, edge_scroll_margin, 220),                         \
         .pointer_divisor = DT_INST_PROP_OR(n, pointer_divisor, 4),                                  \
-        .tap_timeout_ms = DT_INST_PROP_OR(n, tap_timeout_ms, 180),                                  \
-        .double_tap_ms = DT_INST_PROP_OR(n, double_tap_ms, 350),                                   \
-        .tap_move_threshold = DT_INST_PROP_OR(n, tap_move_threshold, 80),                           \
+        .tap_timeout_ms = DT_INST_PROP_OR(n, tap_timeout_ms, 250),                                  \
+        .double_tap_ms = DT_INST_PROP_OR(n, double_tap_ms, 240),                                   \
+        .tap_move_threshold = DT_INST_PROP_OR(n, tap_move_threshold, 140),                          \
         .scroll_step = DT_INST_PROP_OR(n, scroll_step, 160),                                       \
         .inertia_enabled = DT_INST_PROP(n, inertia_enabled),                                       \
         .inertia_decay = DT_INST_PROP_OR(n, inertia_decay, 850),                                   \

@@ -326,15 +326,46 @@ static void pinnacle_release_drag(const struct device *dev) {
     }
 }
 
+static void pinnacle_click_release_cb(struct k_work *work) {
+    struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+    struct pinnacle_data *data = CONTAINER_OF(dwork, struct pinnacle_data, click_release_work);
+    const struct device *dev = data->dev;
+
+    if (data->click_pressed) {
+        input_report_key(dev, INPUT_BTN_0, 0, true, K_FOREVER);
+        data->click_pressed = false;
+    }
+}
+
+static void pinnacle_emit_click(const struct device *dev) {
+    struct pinnacle_data *data = dev->data;
+
+    if (data->drag_active) {
+        return;
+    }
+
+    if (!data->click_pressed) {
+        data->click_pressed = true;
+        input_report_key(dev, INPUT_BTN_0, 1, true, K_FOREVER);
+    }
+    k_work_reschedule(&data->click_release_work, K_MSEC(12));
+}
+
+static void pinnacle_release_click(const struct device *dev) {
+    struct pinnacle_data *data = dev->data;
+
+    if (data->click_pressed) {
+        input_report_key(dev, INPUT_BTN_0, 0, true, K_FOREVER);
+        data->click_pressed = false;
+    }
+}
+
 static void pinnacle_deferred_click_cb(struct k_work *work) {
     struct k_work_delayable *dwork = k_work_delayable_from_work(work);
     struct pinnacle_data *data = CONTAINER_OF(dwork, struct pinnacle_data, click_work);
     const struct device *dev = data->dev;
 
-    if (!data->drag_active) {
-        input_report_key(dev, INPUT_BTN_0, 1, false, K_FOREVER);
-        input_report_key(dev, INPUT_BTN_0, 0, true, K_FOREVER);
-    }
+    pinnacle_emit_click(dev);
     data->last_tap_ms = -1;
 }
 
@@ -353,6 +384,8 @@ static void pinnacle_handle_tap_release(const struct device *dev, int64_t now_ms
         if (data->drag_active) {
             pinnacle_release_drag(dev);
         } else {
+            pinnacle_release_click(dev);
+            k_work_cancel_delayable(&data->click_release_work);
             input_report_key(dev, INPUT_BTN_0, 1, true, K_FOREVER);
             data->drag_active = true;
         }
@@ -364,8 +397,7 @@ static void pinnacle_handle_tap_release(const struct device *dev, int64_t now_ms
         data->last_tap_ms = now_ms;
         k_work_schedule(&data->click_work, K_MSEC(config->double_tap_ms));
     } else if (!data->drag_active) {
-        input_report_key(dev, INPUT_BTN_0, 1, false, K_FOREVER);
-        input_report_key(dev, INPUT_BTN_0, 0, true, K_FOREVER);
+        pinnacle_emit_click(dev);
         data->last_tap_ms = now_ms;
     }
 }
@@ -834,11 +866,14 @@ int pinnacle_apply_runtime_config(const struct device *dev, bool hardware_tuning
     int ret;
 
     k_mutex_lock(&data->lock, K_FOREVER);
+    pinnacle_release_drag(dev);
+    pinnacle_release_click(dev);
     data->touching = false;
     data->moved_since_touch = false;
     data->scroll_active = false;
     data->drag_active = false;
     data->inertia_active = false;
+    data->click_pressed = false;
     data->scroll_accum = 0;
     data->touch_start_x = 0;
     data->touch_start_y = 0;
@@ -850,9 +885,9 @@ int pinnacle_apply_runtime_config(const struct device *dev, bool hardware_tuning
     data->inertia_rem_y = 0;
     data->inertia_ticks = 0;
     data->last_tap_ms = -1;
-    pinnacle_release_drag(dev);
     k_work_cancel(&data->work);
     k_work_cancel_delayable(&data->click_work);
+    k_work_cancel_delayable(&data->click_release_work);
     k_work_cancel_delayable(&data->inertia_work);
 
     if (hardware_tuning) {
@@ -920,6 +955,7 @@ static int pinnacle_init(const struct device *dev) {
     data->scroll_active = false;
     data->drag_active = false;
     data->inertia_active = false;
+    data->click_pressed = false;
     data->scroll_accum = 0;
     data->touch_start_x = 0;
     data->touch_start_y = 0;
@@ -1011,6 +1047,7 @@ static int pinnacle_init(const struct device *dev) {
 
     k_work_init(&data->work, pinnacle_work_cb);
     k_work_init_delayable(&data->click_work, pinnacle_deferred_click_cb);
+    k_work_init_delayable(&data->click_release_work, pinnacle_click_release_cb);
     k_work_init_delayable(&data->inertia_work, pinnacle_inertia_work_cb);
 
     ret = set_int(dev, true);
@@ -1031,6 +1068,8 @@ static int pinnacle_pm_action(const struct device *dev, enum pm_device_action ac
         pinnacle_stop_inertia(dev);
         k_work_cancel(&data->work);
         k_work_cancel_delayable(&data->click_work);
+        k_work_cancel_delayable(&data->click_release_work);
+        pinnacle_release_click(dev);
         return set_int(dev, false);
     case PM_DEVICE_ACTION_RESUME:
         return set_int(dev, true);

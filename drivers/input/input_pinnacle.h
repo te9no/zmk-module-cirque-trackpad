@@ -84,6 +84,7 @@ struct pinnacle_data {
     bool scroll_active;
     bool drag_active;
     bool inertia_active;
+    bool click_pressed;
     uint16_t last_x;
     uint16_t last_y;
     uint16_t touch_start_x;
@@ -104,6 +105,7 @@ struct pinnacle_data {
     struct k_mutex lock;
     struct k_work work;
     struct k_work_delayable click_work;
+    struct k_work_delayable click_release_work;
     struct k_work_delayable inertia_work;
 };
 

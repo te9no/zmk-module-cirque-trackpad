@@ -1,12 +1,18 @@
 import { useContext, useMemo, useState } from "react";
 import { connect as serialConnect } from "@zmkfirmware/zmk-studio-ts-client/transport/serial";
-import { connect as gattConnect } from "@zmkfirmware/zmk-studio-ts-client/transport/gatt";
 import {
   ZMKAppContext,
   ZMKConnection,
   ZMKCustomSubsystem,
 } from "@cormoran/zmk-studio-react-hook";
 import { Request, Response, Sensitivity, type TrackpadDevice } from "./proto/dya/trackpad/trackpad";
+
+type RpcTransport = {
+  label: string;
+  abortController: AbortController;
+  readable: ReadableStream<Uint8Array>;
+  writable: WritableStream<Uint8Array>;
+};
 
 type TrackpadRequest = Request & { setDevice?: { device: TrackpadDevice } };
 
@@ -16,6 +22,70 @@ const SUBSYSTEM_CANDIDATES = [
   "zmk__trackpad",
   "trackpad",
 ];
+
+const ZMK_STUDIO_SERVICE_UUID = "00000000-0196-6107-c967-c5cfb1c2482a";
+const ZMK_STUDIO_RPC_CHARACTERISTIC_UUID = "00000001-0196-6107-c967-c5cfb1c2482a";
+
+async function gattConnectAnyDevice(): Promise<RpcTransport> {
+  const bluetooth = (navigator as Navigator & { bluetooth?: any }).bluetooth;
+  if (!bluetooth) {
+    throw new Error("Web Bluetooth is not available in this browser");
+  }
+
+  const dev = await bluetooth.requestDevice({
+    acceptAllDevices: true,
+    optionalServices: [ZMK_STUDIO_SERVICE_UUID],
+  }).catch((e: unknown) => {
+    if (e instanceof DOMException && e.name === "NotFoundError") {
+      throw new Error("Bluetooth device selection was cancelled");
+    }
+    throw e;
+  });
+
+  if (!dev.gatt) {
+    throw new Error("Selected device does not expose GATT");
+  }
+
+  const abortController = new AbortController();
+  const label = dev.name || "Unknown";
+  const server = dev.gatt.connected ? dev.gatt : await dev.gatt.connect();
+  const svc = await server.getPrimaryService(ZMK_STUDIO_SERVICE_UUID);
+  const char: any = await svc.getCharacteristic(ZMK_STUDIO_RPC_CHARACTERISTIC_UUID);
+
+  const readable = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      await char.stopNotifications().catch(() => undefined);
+      await char.startNotifications();
+      const onValueChanged = (ev: Event) => {
+        const value = (ev.target as { value?: DataView } | null)?.value;
+        if (value) {
+          controller.enqueue(new Uint8Array(value.buffer));
+        }
+      };
+      const onDisconnected = () => {
+        char.removeEventListener("characteristicvaluechanged", onValueChanged);
+        dev.removeEventListener("gattserverdisconnected", onDisconnected);
+        controller.close();
+      };
+      char.addEventListener("characteristicvaluechanged", onValueChanged);
+      dev.addEventListener("gattserverdisconnected", onDisconnected);
+    },
+  });
+
+  const writable = new WritableStream<Uint8Array>({
+    write(chunk) {
+      return char.writeValueWithoutResponse(chunk);
+    },
+  });
+
+  const onAbort = () => {
+    abortController.signal.removeEventListener("abort", onAbort);
+    dev.gatt?.disconnect();
+  };
+  abortController.signal.addEventListener("abort", onAbort);
+
+  return { label, abortController, readable, writable };
+}
 
 const BOOL_FIELDS: Array<keyof TrackpadDevice> = [
   "rotate90",
@@ -247,7 +317,7 @@ export function App() {
                 <button
                   className="btn primary"
                   disabled={isLoading}
-                  onClick={() => connect(gattConnect)}
+                  onClick={() => connect(gattConnectAnyDevice)}
                 >
                   Connect Bluetooth
                 </button>

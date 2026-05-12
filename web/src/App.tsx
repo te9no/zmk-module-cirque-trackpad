@@ -25,6 +25,7 @@ const SUBSYSTEM_CANDIDATES = [
 
 const ZMK_STUDIO_SERVICE_UUID = "00000000-0196-6107-c967-c5cfb1c2482a";
 const ZMK_STUDIO_RPC_CHARACTERISTIC_UUID = "00000001-0196-6107-c967-c5cfb1c2482a";
+const BLE_NAME_PREFIX_FILTERS = ["Geacon", "Polaris", "DYA", "ZMK"];
 
 async function gattConnectAnyDevice(): Promise<RpcTransport> {
   const bluetooth = (navigator as Navigator & { bluetooth?: any }).bluetooth;
@@ -33,7 +34,7 @@ async function gattConnectAnyDevice(): Promise<RpcTransport> {
   }
 
   const dev = await bluetooth.requestDevice({
-    acceptAllDevices: true,
+    filters: BLE_NAME_PREFIX_FILTERS.map((namePrefix) => ({ namePrefix })),
     optionalServices: [ZMK_STUDIO_SERVICE_UUID],
   }).catch((e: unknown) => {
     if (e instanceof DOMException && e.name === "NotFoundError") {

@@ -317,6 +317,29 @@ static int32_t pinnacle_shortest_ring_delta(const struct device *dev, int32_t fr
     return delta;
 }
 
+static int32_t pinnacle_edge_scroll_delta(const struct device *dev, int32_t from_pos, int32_t to_pos,
+                                          uint16_t from_x, uint16_t from_y, uint16_t to_x,
+                                          uint16_t to_y) {
+    const struct pinnacle_config *config = dev->config;
+    const uint16_t margin = MIN(config->edge_scroll_margin, MIN(config->x_max, config->y_max) / 2);
+    const uint16_t right_edge = config->x_max - margin;
+    const uint16_t bottom_edge = config->y_max - margin;
+    const bool from_vertical = from_x <= margin || from_x >= right_edge;
+    const bool to_vertical = to_x <= margin || to_x >= right_edge;
+    const bool from_horizontal = from_y <= margin || from_y >= bottom_edge;
+    const bool to_horizontal = to_y <= margin || to_y >= bottom_edge;
+
+    if (from_vertical && to_vertical) {
+        return (int32_t)to_y - from_y;
+    }
+
+    if (from_horizontal && to_horizontal) {
+        return (int32_t)to_x - from_x;
+    }
+
+    return pinnacle_shortest_ring_delta(dev, from_pos, to_pos);
+}
+
 static void pinnacle_release_drag(const struct device *dev) {
     struct pinnacle_data *data = dev->data;
 
@@ -564,7 +587,8 @@ static void pinnacle_report_abs_gestures(const struct device *dev) {
 
     if (data->scroll_active) {
         const int32_t pos = pinnacle_edge_scroll_position(dev, sample.x, sample.y);
-        data->scroll_accum += pinnacle_shortest_ring_delta(dev, data->scroll_pos, pos);
+        data->scroll_accum += pinnacle_edge_scroll_delta(dev, data->scroll_pos, pos, data->last_x,
+                                                         data->last_y, sample.x, sample.y);
         data->scroll_pos = pos;
 
         const uint16_t scroll_step = config->scroll_step ? config->scroll_step : 1;

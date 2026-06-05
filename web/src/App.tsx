@@ -1,4 +1,4 @@
-import { useContext, useMemo, useState } from "react";
+import { useContext, useMemo, useRef, useState } from "react";
 import { connect as serialConnect } from "@zmkfirmware/zmk-studio-ts-client/transport/serial";
 import {
   ZMKAppContext,
@@ -22,6 +22,9 @@ const SUBSYSTEM_CANDIDATES = [
   "zmk__trackpad",
   "trackpad",
 ];
+const RPC_TIMEOUT_MS = 7000;
+
+type StatusKind = "info" | "success" | "error";
 
 const ZMK_STUDIO_SERVICE_UUID = "00000000-0196-6107-c967-c5cfb1c2482a";
 const ZMK_STUDIO_RPC_CHARACTERISTIC_UUID = "00000001-0196-6107-c967-c5cfb1c2482a";
@@ -352,7 +355,10 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
   const [drafts, setDrafts] = useState<Record<number, TrackpadDevice>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
+  const [status, setStatus] = useState<string>("");
+  const [statusKind, setStatusKind] = useState<StatusKind>("info");
   const [hasLoaded, setHasLoaded] = useState(false);
+  const operationRef = useRef<string | null>(null);
   const connection = zmkApp?.state.connection ?? null;
   const availableSubsystems = ((connection as any)?.subsystems ?? []) as Array<Record<string, unknown>>;
   const availableSubsystemIds = availableSubsystems.map(formatSubsystem);
@@ -370,6 +376,29 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
     return null;
   }, [zmkApp, demoMode]);
 
+  const setStatusMessage = (message: string, kind: StatusKind = "info") => {
+    setStatus(message);
+    setStatusKind(kind);
+  };
+
+  const startOperation = (label: string) => {
+    if (operationRef.current) {
+      setStatusMessage(`${operationRef.current} is still running. Please wait a moment.`);
+      return false;
+    }
+
+    operationRef.current = label;
+    setBusy(true);
+    setError("");
+    setStatusMessage(label);
+    return true;
+  };
+
+  const finishOperation = () => {
+    operationRef.current = null;
+    setBusy(false);
+  };
+
   const call = async (request: TrackpadRequest) => {
     if (!zmkApp || !subsystem) {
       throw new Error("Trackpad subsystem not available");
@@ -380,7 +409,7 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
     }
     const service = new ZMKCustomSubsystem(conn, subsystem.index);
     const payload = encodeTrackpadRequest(request);
-    const respPayload = await service.callRPC(payload);
+    const respPayload = await service.callRPC(payload, { timeout: RPC_TIMEOUT_MS });
     if (!respPayload) {
       throw new Error("Empty RPC response");
     }
@@ -406,58 +435,74 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
     }
   };
 
-  const loadDevices = async () => {
-    setBusy(true);
-    setError("");
-    try {
-      if (demoMode) {
-        await new Promise((resolve) => setTimeout(resolve, 120));
-        hydrate(DEMO_DEVICES);
-      } else {
-        const resp = await call(Request.create({ listDevices: {} }));
-        hydrate(resp.listDevices?.devices ?? []);
+  const loadDeviceList = async () => {
+    if (demoMode) {
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      hydrate(DEMO_DEVICES);
+      return DEMO_DEVICES.length;
+    }
+
+    const resp = await call(Request.create({ listDevices: {} }));
+    const nextDevices = resp.listDevices?.devices ?? [];
+    hydrate(nextDevices);
+    return nextDevices.length;
+  };
+
+  const loadSelectedDevice = async () => {
+    if (selectedId == null) {
+      throw new Error("No trackpad selected");
+    }
+
+    if (demoMode) {
+      const latest = (drafts[selectedId] ?? devices.find((d) => d.id === selectedId)) as TrackpadDevice | undefined;
+      if (!latest) {
+        throw new Error("Device not found");
       }
+      setDevices((prev) => prev.map((d) => (d.id === selectedId ? { ...latest } : d)));
+      return latest;
+    }
+
+    const resp = await call(Request.create({ getDevice: { id: selectedId } }));
+    const device = resp.getDevice?.device;
+    if (!device) {
+      throw new Error("Device not found");
+    }
+    setDevices((prev) => {
+      const idx = prev.findIndex((d) => d.id === device.id);
+      if (idx < 0) {
+        return [...prev, device];
+      }
+      const next = [...prev];
+      next[idx] = device;
+      return next;
+    });
+    setDrafts((prev) => ({ ...prev, [device.id]: device }));
+    return device;
+  };
+
+  const loadDevices = async () => {
+    if (!startOperation(demoMode ? "Loading demo trackpads..." : "Listing trackpads...")) return;
+    try {
+      const count = await loadDeviceList();
+      setStatusMessage(`Loaded ${count} trackpad device(s)`, "success");
     } catch (e) {
       setError(e instanceof Error ? e.message : "RPC failed");
+      setStatusMessage("Failed to load trackpad devices", "error");
     } finally {
-      setBusy(false);
+      finishOperation();
     }
   };
 
   const refreshOne = async () => {
-    if (selectedId == null) {
-      return;
-    }
-    setBusy(true);
-    setError("");
+    if (!startOperation("Refreshing selected trackpad...")) return;
     try {
-      if (demoMode) {
-        const latest = (drafts[selectedId] ?? devices.find((d) => d.id === selectedId)) as TrackpadDevice | undefined;
-        if (!latest) {
-          throw new Error("Device not found");
-        }
-        setDevices((prev) => prev.map((d) => (d.id === selectedId ? { ...latest } : d)));
-      } else {
-        const resp = await call(Request.create({ getDevice: { id: selectedId } }));
-        const device = resp.getDevice?.device;
-        if (!device) {
-          throw new Error("Device not found");
-        }
-        setDevices((prev) => {
-          const idx = prev.findIndex((d) => d.id === device.id);
-          if (idx < 0) {
-            return [...prev, device];
-          }
-          const next = [...prev];
-          next[idx] = device;
-          return next;
-        });
-        setDrafts((prev) => ({ ...prev, [device.id]: device }));
-      }
+      await loadSelectedDevice();
+      setStatusMessage("Refreshed selected trackpad", "success");
     } catch (e) {
       setError(e instanceof Error ? e.message : "RPC failed");
+      setStatusMessage("Failed to refresh selected trackpad", "error");
     } finally {
-      setBusy(false);
+      finishOperation();
     }
   };
 
@@ -465,21 +510,21 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
     if (selectedId == null) {
       return;
     }
-    setBusy(true);
-    setError("");
+    if (!startOperation(enabled ? "Putting trackpad to sleep..." : "Waking trackpad...")) return;
     try {
       if (demoMode) {
         setDevices((prev) => prev.map((d) => (d.id === selectedId ? { ...d, sleep: enabled } : d)));
         setDrafts((prev) => ({ ...prev, [selectedId]: { ...prev[selectedId], sleep: enabled } as TrackpadDevice }));
       } else {
         await call(Request.create({ setSleep: { id: selectedId, enabled } }));
-        await refreshOne();
+        await loadSelectedDevice();
       }
+      setStatusMessage(enabled ? "Trackpad sleep enabled" : "Trackpad sleep disabled", "success");
     } catch (e) {
       setError(e instanceof Error ? e.message : "RPC failed");
-      setBusy(false);
+      setStatusMessage("Failed to update trackpad sleep state", "error");
     } finally {
-      setBusy(false);
+      finishOperation();
     }
   };
 
@@ -487,21 +532,21 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
     if (selectedId == null) {
       return;
     }
-    setBusy(true);
-    setError("");
+    if (!startOperation("Resetting trackpad settings...")) return;
     try {
       if (demoMode) {
         await new Promise((resolve) => setTimeout(resolve, 120));
         setDevices((prev) => prev.map((d) => (d.id === selectedId ? { ...d, sleep: false } : d)));
       } else {
         await call(Request.create({ resetDevice: { id: selectedId } }));
-        await refreshOne();
+        await loadSelectedDevice();
       }
+      setStatusMessage("Reset trackpad settings", "success");
     } catch (e) {
       setError(e instanceof Error ? e.message : "RPC failed");
-      setBusy(false);
+      setStatusMessage("Failed to reset trackpad settings", "error");
     } finally {
-      setBusy(false);
+      finishOperation();
     }
   };
 
@@ -509,8 +554,7 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
     if (selectedId == null || !draft) {
       return;
     }
-    setBusy(true);
-    setError("");
+    if (!startOperation("Applying trackpad settings...")) return;
     try {
       if (demoMode) {
         await new Promise((resolve) => setTimeout(resolve, 120));
@@ -521,10 +565,12 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
         setDevices((prev) => prev.map((d) => (d.id === selectedId ? device : d)));
         setDrafts((prev) => ({ ...prev, [selectedId]: device }));
       }
+      setStatusMessage("Applied trackpad settings", "success");
     } catch (e) {
       setError(e instanceof Error ? e.message : "RPC failed");
+      setStatusMessage("Failed to apply trackpad settings", "error");
     } finally {
-      setBusy(false);
+      finishOperation();
     }
   };
 
@@ -583,6 +629,7 @@ function TrackpadSection({ demoMode }: { demoMode: boolean }) {
         </button>
       </div>
 
+      {status && <p className={`status ${statusKind}`}>{status}</p>}
       {error && <p className="error">{error}</p>}
 
       {!demoMode && connection && !subsystem && (

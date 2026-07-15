@@ -1,4 +1,4 @@
-#define DT_DRV_COMPAT cirque_pinnacle
+#define DT_DRV_COMPAT cirque_pinnacle_dya
 
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 #include <zephyr/init.h>

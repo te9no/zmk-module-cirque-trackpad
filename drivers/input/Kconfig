@@ -5,10 +5,10 @@ menuconfig INPUT_PINNACLE
     bool "Cirque Pinnacle trackpads"
     default y
     depends on INPUT
-    depends on DT_HAS_CIRQUE_PINNACLE_ENABLED
+    depends on DT_HAS_CIRQUE_PINNACLE_DYA_ENABLED
     select GPIO
-    select I2C if $(dt_compat_on_bus,$(DT_COMPAT_CIRQUE_PINNACLE),i2c)
-    select SPI if $(dt_compat_on_bus,$(DT_COMPAT_CIRQUE_PINNACLE),spi)
+    select I2C if $(dt_compat_on_bus,$(DT_COMPAT_CIRQUE_PINNACLE_DYA),i2c)
+    select SPI if $(dt_compat_on_bus,$(DT_COMPAT_CIRQUE_PINNACLE_DYA),spi)
     help
       Enable driver for Cirque Pinnacle trackpads
 

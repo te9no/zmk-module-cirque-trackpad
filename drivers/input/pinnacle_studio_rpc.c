@@ -1,4 +1,4 @@
-#define DT_DRV_COMPAT cirque_pinnacle
+#define DT_DRV_COMPAT cirque_pinnacle_dya
 
 #include <pb_decode.h>
 #include <pb_encode.h>
@@ -96,7 +96,7 @@ static struct zmk_rpc_custom_subsystem_meta trackpad_rpc_meta = {
 ZMK_RPC_CUSTOM_SUBSYSTEM(dya__trackpad, &trackpad_rpc_meta, dya_trackpad_rpc_handle_request);
 ZMK_RPC_CUSTOM_SUBSYSTEM_RESPONSE_BUFFER(dya__trackpad, dya_trackpad_Response);
 
-#if IS_ENABLED(CONFIG_INPUT_PINNACLE) && DT_HAS_COMPAT_STATUS_OKAY(cirque_pinnacle)
+#if IS_ENABLED(CONFIG_INPUT_PINNACLE) && DT_HAS_COMPAT_STATUS_OKAY(cirque_pinnacle_dya)
 #define PINNACLE_DEV_REF(n) DEVICE_DT_GET(DT_DRV_INST(n)),
 static const struct device *const pinnacle_devices[] = {DT_INST_FOREACH_STATUS_OKAY(PINNACLE_DEV_REF)};
 #else

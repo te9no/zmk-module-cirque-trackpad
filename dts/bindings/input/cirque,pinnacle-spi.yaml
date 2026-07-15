@@ -3,4 +3,4 @@ description: |
 
 compatible: "cirque,pinnacle-dya"
 
-include: ["spi-device.yaml", "cirque,pinnacle-common.yaml"]
+include: ["spi-device.yaml", "cirque,pinnacle-dya-common.yaml"]

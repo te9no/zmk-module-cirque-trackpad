@@ -3,4 +3,4 @@ description: |
 
 compatible: "cirque,pinnacle-dya"
 
-include: ["i2c-device.yaml", "cirque,pinnacle-common.yaml"]
+include: ["i2c-device.yaml", "cirque,pinnacle-dya-common.yaml"]

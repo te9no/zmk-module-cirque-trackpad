@@ -1,7 +1,7 @@
 # Copyright (c) 2022 The ZMK Contributors
 # SPDX-License-Identifier: MIT
 
-menuconfig INPUT_PINNACLE
+menuconfig INPUT_PINNACLE_DYA
     bool "Cirque Pinnacle trackpads"
     default y
     depends on INPUT
@@ -28,7 +28,7 @@ config INPUT_PINNACLE_STUDIO_RPC_SPLIT_TIMEOUT_MS
     default 5000
     depends on INPUT_PINNACLE_STUDIO_RPC && ZMK_SPLIT_RELAY_EVENT
 
-if INPUT_PINNACLE
+if INPUT_PINNACLE_DYA
 
 config INPUT_PINNACLE_INIT_PRIORITY
     int "Cirque Pinnacle initialization priority"

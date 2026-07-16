@@ -96,7 +96,7 @@ static struct zmk_rpc_custom_subsystem_meta trackpad_rpc_meta = {
 ZMK_RPC_CUSTOM_SUBSYSTEM(dya__trackpad, &trackpad_rpc_meta, dya_trackpad_rpc_handle_request);
 ZMK_RPC_CUSTOM_SUBSYSTEM_RESPONSE_BUFFER(dya__trackpad, dya_trackpad_Response);
 
-#if IS_ENABLED(CONFIG_INPUT_PINNACLE) && DT_HAS_COMPAT_STATUS_OKAY(cirque_pinnacle_dya)
+#if IS_ENABLED(CONFIG_INPUT_PINNACLE_DYA) && DT_HAS_COMPAT_STATUS_OKAY(cirque_pinnacle_dya)
 #define PINNACLE_DEV_REF(n) DEVICE_DT_GET(DT_DRV_INST(n)),
 static const struct device *const pinnacle_devices[] = {DT_INST_FOREACH_STATUS_OKAY(PINNACLE_DEV_REF)};
 #else
@@ -387,7 +387,7 @@ static int reset_local_device_by_id(uint32_t id) {
     return 0;
 }
 
-#if IS_ENABLED(CONFIG_SETTINGS) && IS_ENABLED(CONFIG_INPUT_PINNACLE)
+#if IS_ENABLED(CONFIG_SETTINGS) && IS_ENABLED(CONFIG_INPUT_PINNACLE_DYA)
 
 #define TRACKPAD_SETTINGS_VERSION 1
 #define TRACKPAD_SETTINGS_PREFIX "dya/trackpad"
@@ -576,7 +576,7 @@ static int set_local_sleep_by_id(uint32_t id, bool enabled) {
         return -ENOENT;
     }
 
-#if IS_ENABLED(CONFIG_INPUT_PINNACLE)
+#if IS_ENABLED(CONFIG_INPUT_PINNACLE_DYA)
     int rc = pinnacle_set_sleep(dev, enabled);
     if (rc != 0) {
         return rc;
@@ -584,7 +584,7 @@ static int set_local_sleep_by_id(uint32_t id, bool enabled) {
 
     struct pinnacle_config *cfg = (struct pinnacle_config *)dev->config;
     cfg->sleep_en = enabled;
-#if IS_ENABLED(CONFIG_SETTINGS) && IS_ENABLED(CONFIG_INPUT_PINNACLE)
+#if IS_ENABLED(CONFIG_SETTINGS) && IS_ENABLED(CONFIG_INPUT_PINNACLE_DYA)
     schedule_local_device_settings_save(dev);
 #endif
     return 0;
@@ -599,7 +599,7 @@ static int apply_local_device_by_id(const dya_trackpad_TrackpadDevice *device) {
         return -ENOENT;
     }
 
-#if IS_ENABLED(CONFIG_INPUT_PINNACLE)
+#if IS_ENABLED(CONFIG_INPUT_PINNACLE_DYA)
     struct pinnacle_config *cfg = (struct pinnacle_config *)dev->config;
     const bool hardware_tuning =
         cfg->sensitivity != (enum pinnacle_sensitivity)device->sensitivity ||
@@ -639,7 +639,7 @@ static int apply_local_device_by_id(const dya_trackpad_TrackpadDevice *device) {
         return rc;
     }
 
-#if IS_ENABLED(CONFIG_SETTINGS) && IS_ENABLED(CONFIG_INPUT_PINNACLE)
+#if IS_ENABLED(CONFIG_SETTINGS) && IS_ENABLED(CONFIG_INPUT_PINNACLE_DYA)
     schedule_local_device_settings_save(dev);
 #endif
 
@@ -649,7 +649,7 @@ static int apply_local_device_by_id(const dya_trackpad_TrackpadDevice *device) {
 #endif
 }
 
-#if IS_ENABLED(CONFIG_SETTINGS) && IS_ENABLED(CONFIG_INPUT_PINNACLE)
+#if IS_ENABLED(CONFIG_SETTINGS) && IS_ENABLED(CONFIG_INPUT_PINNACLE_DYA)
 
 static int trackpad_settings_set(const char *name, size_t len, settings_read_cb read_cb,
                                  void *cb_arg) {

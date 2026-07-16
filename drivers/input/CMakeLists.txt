@@ -3,7 +3,7 @@
 
 zephyr_library_amend()
 
-zephyr_library_sources_ifdef(CONFIG_INPUT_PINNACLE input_pinnacle.c)
+zephyr_library_sources_ifdef(CONFIG_INPUT_PINNACLE_DYA input_pinnacle.c)
 zephyr_library_sources_ifdef(CONFIG_INPUT_PINNACLE_STUDIO_RPC pinnacle_studio_rpc.c)
 zephyr_library_sources_ifdef(CONFIG_INPUT_PINNACLE_STUDIO_RPC proto/dya/trackpad/trackpad.pb.c)
 

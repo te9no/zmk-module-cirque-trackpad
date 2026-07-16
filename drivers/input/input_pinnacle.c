@@ -28,15 +28,48 @@ static int pinnacle_write(const struct device *dev, const uint8_t addr, const ui
 
 #if DT_ANY_INST_ON_BUS_STATUS_OKAY(i2c)
 
+static void pinnacle_i2c_retry_wait(const struct pinnacle_config *config, int attempt, int ret,
+                                    const char *op) {
+    LOG_WRN("%s failed on attempt %d: %d", op, attempt + 1, ret);
+    (void)i2c_recover_bus(config->bus.i2c.bus);
+    k_msleep(CONFIG_INPUT_PINNACLE_I2C_RETRY_DELAY_MS);
+}
+
 static int pinnacle_i2c_seq_read(const struct device *dev, const uint8_t addr, uint8_t *buf,
                                  const uint8_t len) {
     const struct pinnacle_config *config = dev->config;
-    return i2c_burst_read_dt(&config->bus.i2c, PINNACLE_READ | addr, buf, len);
+    int ret;
+
+    for (int attempt = 0; attempt <= CONFIG_INPUT_PINNACLE_I2C_RETRIES; attempt++) {
+        ret = i2c_burst_read_dt(&config->bus.i2c, PINNACLE_READ | addr, buf, len);
+        if (ret == 0) {
+            return 0;
+        }
+
+        if (attempt < CONFIG_INPUT_PINNACLE_I2C_RETRIES) {
+            pinnacle_i2c_retry_wait(config, attempt, ret, "i2c read");
+        }
+    }
+
+    return ret;
 }
 
 static int pinnacle_i2c_write(const struct device *dev, const uint8_t addr, const uint8_t val) {
     const struct pinnacle_config *config = dev->config;
-    return i2c_reg_write_byte_dt(&config->bus.i2c, PINNACLE_WRITE | addr, val);
+    int ret;
+
+    for (int attempt = 0; attempt <= CONFIG_INPUT_PINNACLE_I2C_RETRIES; attempt++) {
+        ret = i2c_reg_write_byte_dt(&config->bus.i2c, PINNACLE_WRITE | addr, val);
+        if (ret == 0) {
+            return 0;
+        }
+
+        if (attempt < CONFIG_INPUT_PINNACLE_I2C_RETRIES) {
+            pinnacle_i2c_retry_wait(config, attempt, ret, "i2c write");
+        }
+    }
+
+    return ret;
 }
 
 #endif // DT_ANY_INST_ON_BUS_STATUS_OKAY(i2c)

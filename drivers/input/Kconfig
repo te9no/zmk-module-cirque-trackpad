@@ -34,6 +34,24 @@ config INPUT_PINNACLE_INIT_PRIORITY
     int "Cirque Pinnacle initialization priority"
     default INPUT_INIT_PRIORITY
 
+config INPUT_PINNACLE_I2C_RETRIES
+    int "Cirque Pinnacle I2C retry count"
+    depends on I2C
+    range 0 10
+    default 3
+    help
+      Number of additional attempts for low-level I2C register reads and writes.
+      This helps software I2C routes tolerate transient NACKs during deferred
+      module initialization.
+
+config INPUT_PINNACLE_I2C_RETRY_DELAY_MS
+    int "Cirque Pinnacle I2C retry delay"
+    depends on I2C
+    range 0 100
+    default 2
+    help
+      Delay in milliseconds between low-level I2C retry attempts.
+
 if ZMK_MOUSE
 
 config ZMK_INPUT_PINNACLE_IDLE_SLEEPER
